@@ -16,9 +16,9 @@ if __name__ == '__main__':
     task = Task()
 
     # We define in 'data flow' that we wish to transform first
-    task.withAction('compress')
+    task.with_action('compress')
 
-    task.withOutput('data/transformed.cim')  # this is a raw file after transformation
+    task.with_output('data/transformed.cim')  # this is a raw file after transformation
     # hence atypical filetype, as most of commercial tools won't be able to read this file
 
     # Let's see the input file ourselves
@@ -32,16 +32,16 @@ if __name__ == '__main__':
     imshow(np.asarray(input_img))
 
     # We're telling our framework where to find the image
-    task.withInput('data/image.bmp')
+    task.with_input('data/image.bmp')
 
     # Let's process it!
     task.run()
 
     # Now we're recreating image from the result
     task = Task()
-    task.withAction('extract')
-    task.withInput('data/transformed.cim')
-    task.withOutput('data/recreated.bmp')
+    task.with_action('extract')
+    task.with_input('data/transformed.cim')
+    task.with_output('data/recreated.bmp')
 
     # Run the process
     # Check inverseTransform(self, src) in fal.transforms for more details

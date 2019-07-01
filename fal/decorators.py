@@ -3,15 +3,17 @@ import inspect
 
 globalCache = {}
 
-def ensureHashable(args):
-    def replaceUnhashable(x):
+
+def ensure_hashable(args):
+    def replace_unhashable(x):
         if isinstance(x, collections.Hashable):
             return x
         else:
             return str(x)
-    return map(replaceUnhashable, args)
+    return map(replace_unhashable, args)
 
-def makeKey(function, passedArgs, kwargs):
+
+def make_key(function, passed_args, kwargs):
     argspec = inspect.getargspec(function)
 
     args = [None] * len(argspec.args)
@@ -20,20 +22,21 @@ def makeKey(function, passedArgs, kwargs):
         n = len(argspec.defaults)
         args[-n:] = argspec.defaults
 
-    n = len(passedArgs)
-    args[:n] = list(passedArgs)
+    n = len(passed_args)
+    args[:n] = list(passed_args)
 
-    dict = {}
+    keymap = {}
     for i in xrange(0, len(argspec.args)):
-        dict[argspec.args[i]] = i
+        keymap[argspec.args[i]] = i
     for (key, value) in kwargs.items():
-        args[dict[key]] = value
+        args[keymap[key]] = value
 
-    return tuple([function] + ensureHashable(args))
+    return tuple([function] + ensure_hashable(args))
+
 
 def cached(function):
     def wrapper(*args, **kwargs):
-        key = makeKey(function, args, kwargs)
+        key = make_key(function, args, kwargs)
         if key in globalCache.keys():
             return globalCache[key]
         else:

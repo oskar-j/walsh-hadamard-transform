@@ -3,6 +3,7 @@ from colors import RgbColorModel, YCbCrColorModel
 from image import BMPImage, CustomizableImage
 from transforms import WalshHadamardTransform
 
+
 class Task:
 
     def __init__(self):
@@ -11,134 +12,136 @@ class Task:
         self.__action = None
         self.__coeff_removal = None
 
-    def __getPaddingSize(self, x, a):
+    @staticmethod
+    def _get_padding_size(x, a):
         return ((x - 1) // a + 1) * a - x
 
-    def __slice(self, x, width, height, blockSize):
+    def _slice(self, x, width, height, block_size):
         x = np.matrix(x).reshape(height, width)
         print 'Shape: ' + str(x.shape)
 
-        heightPadding = self.__getPaddingSize(height, blockSize)
-        print 'Height pad: ' + str(heightPadding)
-        x = np.concatenate((x, np.zeros((heightPadding, x.shape[1]))), 0)
+        height_padding = self._get_padding_size(height, block_size)
+        print 'Height pad: ' + str(height_padding)
+        x = np.concatenate((x, np.zeros((height_padding, x.shape[1]))), 0)
 
-        widthPadding = self.__getPaddingSize(width, blockSize)
-        print 'Width pad: ' + str(widthPadding)
-        x = np.concatenate((x, np.zeros((x.shape[0], widthPadding))), 1)
+        width_padding = self._get_padding_size(width, block_size)
+        print 'Width pad: ' + str(width_padding)
+        x = np.concatenate((x, np.zeros((x.shape[0], width_padding))), 1)
 
         blocks = []
-        for row in np.vsplit(x, x.shape[0] / blockSize):
-            blocks.extend(np.hsplit(row, row.shape[1] / blockSize))
+        for row in np.vsplit(x, x.shape[0] / block_size):
+            blocks.extend(np.hsplit(row, row.shape[1] / block_size))
 
         print 'Number of blocks: ' + str(len(blocks))
         print blocks[0].shape
 
         return blocks
 
-    def __merge(self, blocks, width, height):
-        blockHeight, blockWidth = blocks[0].shape
-        blocksPerRow = (width - 1) // blockWidth + 1
-        blocksPerColumn = len(blocks) / blocksPerRow
-        rows = [np.hstack(blocks[i * blocksPerRow : (i + 1) * blocksPerRow])
-               for i in xrange(0, blocksPerColumn)]
+    @staticmethod
+    def _merge(blocks, width, height):
+        block_height, block_width = blocks[0].shape
+        blocks_per_row = (width - 1) // block_width + 1
+        blocks_per_column = len(blocks) / blocks_per_row
+        rows = [np.hstack(blocks[i * blocks_per_row: (i + 1) * blocks_per_row])
+               for i in xrange(0, blocks_per_column)]
         return np.vstack(rows)[0:height, 0:width]
 
     def compress(self):
         print 'Action: compress'
 
-        bmpImage = BMPImage()
+        bmp_image = BMPImage()
         try:
-            bmpImage.load(self.__input)
+            bmp_image.load(self.__input)
         except IOError as e:
             print 'IO Error: ' + str(e)
             return
 
-        width, height = bmpImage.getDimensions()
-        data = bmpImage.getRawData()
+        width, height = bmp_image.get_dimensions()
+        data = bmp_image.get_raw_data()
 
         color = RgbColorModel()
-        y, cb, cr = zip(*map(color.getYCbCr, data))
+        y, cb, cr = zip(*map(color.get_y_cb_cr, data))
 
-        yBlockSize = 8
-        cbBlockSize = 16
-        crBlockSize = 16
+        y_block_size = 8
+        cb_block_size = 16
+        cr_block_size = 16
 
-        y = self.__slice(y, width, height, yBlockSize)
-        cb = self.__slice(cb, width, height, cbBlockSize)
-        cr = self.__slice(cr, width, height, crBlockSize)
+        y = self._slice(y, width, height, y_block_size)
+        cb = self._slice(cb, width, height, cb_block_size)
+        cr = self._slice(cr, width, height, cr_block_size)
 
         transform = WalshHadamardTransform(self.__coeff_removal)
-        spectralY = transform.transformSequence(y)
-        spectralCb = transform.transformSequence(cb)
-        spectralCr = transform.transformSequence(cr)
+        spectral_y = transform.transform_sequence(y)
+        spectral_cb = transform.transform_sequence(cb)
+        spectral_cr = transform.transform_sequence(cr)
 
-        customizableImage = CustomizableImage()
-        customizableImage.setDimensions(width, height)
-        customizableImage.setDescriptions(
-            (yBlockSize, 4, len(spectralY)),
-            (cbBlockSize, 4, len(spectralCb)),
-            (crBlockSize, 4, len(spectralCr))
+        customizable_image = CustomizableImage()
+        customizable_image.set_dimensions(width, height)
+        customizable_image.set_descriptions(
+            (y_block_size, 4, len(spectral_y)),
+            (cb_block_size, 4, len(spectral_cb)),
+            (cr_block_size, 4, len(spectral_cr))
         )
-        customizableImage.setData(spectralY, spectralCb, spectralCr)
-        customizableImage.save(self.__output)
+        customizable_image.set_data(spectral_y, spectral_cb, spectral_cr)
+        customizable_image.save(self.__output)
 
     def extract(self):
         print 'Action: extract'
 
-        customizableImage = CustomizableImage.load(self.__input)
-        width, height = customizableImage.getDimensions()
+        customizable_image = CustomizableImage.load(self.__input)
+        width, height = customizable_image.get_dimensions()
 
         transform = WalshHadamardTransform()
 
-        spectralY = customizableImage.getYData()
-        if spectralY:
-            y = transform.inverseTransformSequence(spectralY)
-            y = self.__merge(y, width, height)
+        spectral_y = customizable_image.get_y_data()
+        if spectral_y:
+            y = transform.inverse_transform_sequence(spectral_y)
+            y = self._merge(y, width, height)
             y = np.array(y).reshape(-1).tolist()
             print len(y)
         else:
             y = [0] * (width * height)
 
-        spectralCb = customizableImage.getCbData()
-        if spectralCb:
-            cb = transform.inverseTransformSequence(spectralCb)
-            cb = self.__merge(cb, width, height)
+        spectral_cb = customizable_image.get_cb_data()
+        if spectral_cb:
+            cb = transform.inverse_transform_sequence(spectral_cb)
+            cb = self._merge(cb, width, height)
             cb = np.array(cb).reshape(-1).tolist()
             print len(cb)
         else:
             cb = [128] * (width * height)
 
-        spectralCr = customizableImage.getCrData()
-        if spectralCr:
-            cr = transform.inverseTransformSequence(spectralCr)
-            cr = self.__merge(cr, width, height)
+        spectral_cr = customizable_image.get_cr_data()
+        if spectral_cr:
+            cr = transform.inverse_transform_sequence(spectral_cr)
+            cr = self._merge(cr, width, height)
             cr = np.array(cr).reshape(-1).tolist()
             print len(cr)
         else:
             cr = [128] * (width * height)
 
-        pixels = map(YCbCrColorModel().getRGB, zip(y, cb, cr))
+        pixels = map(YCbCrColorModel().get_rgb, zip(y, cb, cr))
 
-        bmpImage = BMPImage()
-        bmpImage.setDimensions(width, height)
-        bmpImage.setRawData(pixels)
-        bmpImage.save(self.__output)
+        bmp_image = BMPImage()
+        bmp_image.set_dimensions(width, height)
+        bmp_image.set_raw_data(pixels)
+        bmp_image.save(self.__output)
 
     __actions = {'compress': compress, 'extract': extract}
 
-    def withInput(self, input):
+    def with_input(self, input):
         self.__input = input
         return self
 
-    def withCoeffRemoval(self, coeff):
+    def with_coeff_removal(self, coeff):
         self.__coeff_removal = coeff
         return self
 
-    def withOutput(self, output):
+    def with_output(self, output):
         self.__output = output
         return self
 
-    def withAction(self, action):
+    def with_action(self, action):
         if action in Task.__actions:
             self.__action = Task.__actions[action]
         return self

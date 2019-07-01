@@ -2,29 +2,29 @@ import math
 import numpy as np
 from decorators import cached
 
+
 class AbstractTransform:
 
     def transform(self, src):
         pass
 
-    def transformSequence(self, srcSeq):
-        return map(lambda x: self.transform(x), srcSeq)
+    def transform_sequence(self, src_seq):
+        return map(lambda x: self.transform(x), src_seq)
 
-    def inverseTransform(self, src):
+    def inverse_transform(self, src):
         pass
 
-    def inverseTransformSequence(self, srcSeq):
-        return map(lambda x: self.inverseTransform(x), srcSeq)
+    def inverse_transform_sequence(self, src_seq):
+        return map(lambda x: self.inverse_transform(x), src_seq)
 
 
 class WalshHadamardTransform(AbstractTransform):
-
 
     def __init__(self, coeff=None):
         self.__coeff = coeff
 
     @cached
-    def __getMatrix(self, size):
+    def _get_matrix(self, size):
         # Generating Hadamard matrix of size 'size'
         n = int(math.log(size, 2))
         row = [1 / (np.sqrt(2) ** n) for i in xrange(0, size)]
@@ -40,13 +40,13 @@ class WalshHadamardTransform(AbstractTransform):
                                 matrix[j][k] = 0
 
         # Producing Walsh-Hadamard matrix by ordering frequencies in ascending order
-        matrix.sort(key = lambda x: sum(map(lambda a: a[0] * a[1] < 0, zip(x[1:], x[:-1]))))
+        matrix.sort(key=lambda x: sum(map(lambda a: a[0] * a[1] < 0, zip(x[1:], x[:-1]))))
         return matrix
 
     def transform(self, src):
         size = src.shape[0]
-        h = np.matrix(self.__getMatrix(size))
+        h = np.matrix(self._get_matrix(size))
         return h * src * h
 
-    def inverseTransform(self, src):
+    def inverse_transform(self, src):
         return self.transform(src)
