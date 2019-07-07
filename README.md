@@ -28,6 +28,12 @@ It is also a crucial part of *Grover's algorithm* and *Shor's algorithm* in quan
 
 This code is partially based on the solution from [ktisha/python2012](https://github.com/ktisha/python2012/tree/dee4beda8e22f3a66a3e31384d4b72ab66102e88/avereshchagin)
 
+## How to run
+
+```
+python transform.py
+```
+
 ## Requirements
 
 ### Libraries
