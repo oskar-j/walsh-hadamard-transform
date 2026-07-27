@@ -1,0 +1,7 @@
+# Extra packages needed only by examples/roundtrip.py, which displays the
+# before/after images and their histograms. Equivalent to `pip install .[demo]`.
+
+-r requirements.txt
+
+matplotlib>=3.7,<4
+Pillow>=10.0,<13

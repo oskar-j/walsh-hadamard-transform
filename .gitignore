@@ -102,3 +102,7 @@ venv.bak/
 
 # mypy
 .mypy_cache/
+
+# Project artefacts
+data/transformed.cim
+*.cim
