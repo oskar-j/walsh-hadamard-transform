@@ -14,7 +14,14 @@ from importlib.metadata import PackageNotFoundError, version
 
 from walsh.colors import ColorModel, RgbColorModel, YCbCrColorModel
 from walsh.exceptions import UnsupportedFileFormatError, WalshError
-from walsh.image import BlockDescription, BMPImage, CustomizableImage
+from walsh.image import (
+    BlockDescription,
+    BMPImage,
+    CustomizableImage,
+    PPMImage,
+    RasterImage,
+    reader_for,
+)
 from walsh.task import Action, Task
 from walsh.transforms import Transform, WalshHadamardTransform
 
@@ -29,6 +36,8 @@ __all__ = [
     "BlockDescription",
     "ColorModel",
     "CustomizableImage",
+    "PPMImage",
+    "RasterImage",
     "RgbColorModel",
     "Task",
     "Transform",
@@ -37,4 +46,5 @@ __all__ = [
     "WalshHadamardTransform",
     "YCbCrColorModel",
     "__version__",
+    "reader_for",
 ]

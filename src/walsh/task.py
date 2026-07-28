@@ -11,7 +11,7 @@ import numpy as np
 import numpy.typing as npt
 
 from walsh.colors import RgbColorModel, YCbCrColorModel
-from walsh.image import BlockDescription, BMPImage, CustomizableImage, FileSource
+from walsh.image import BlockDescription, CustomizableImage, FileSource, reader_for
 from walsh.transforms import WalshHadamardTransform
 
 __all__ = ["Action", "Task"]
@@ -58,6 +58,15 @@ class Task:
         cr_block_size: int = DEFAULT_CHROMA_BLOCK_SIZE,
         packed_block_size: int = DEFAULT_PACKED_BLOCK_SIZE,
     ) -> None:
+        """Create an unconfigured task with the default block geometry.
+
+        Args:
+            y_block_size: Block edge used for the luma channel.
+            cb_block_size: Block edge used for the Cb channel.
+            cr_block_size: Block edge used for the Cr channel.
+            packed_block_size: How many low-frequency coefficients per axis are
+                kept when writing. This is the codec's lossy knob.
+        """
         self._input: FileSource = None
         self._output: FileSource = None
         self._action: Action | None = None
@@ -70,15 +79,43 @@ class Task:
     # -- configuration ---------------------------------------------------
 
     def with_input(self, source: FileSource) -> Task:
+        """Set where the input is read from.
+
+        Args:
+            source: Path to read, or ``None`` to read from stdin.
+
+        Returns:
+            This task, so calls can be chained.
+        """
         self._input = source
         return self
 
     def with_output(self, destination: FileSource) -> Task:
+        """Set where the result is written.
+
+        For :meth:`extract` the suffix also selects the output raster format.
+
+        Args:
+            destination: Path to write, or ``None`` to write to stdout.
+
+        Returns:
+            This task, so calls can be chained.
+        """
         self._output = destination
         return self
 
     def with_action(self, action: Action | str) -> Task:
-        """Select the pipeline to run. Raises :class:`ValueError` if unknown."""
+        """Select which pipeline :meth:`run` will execute.
+
+        Args:
+            action: An :class:`Action`, or its string value.
+
+        Returns:
+            This task, so calls can be chained.
+
+        Raises:
+            ValueError: If ``action`` is not one of the known actions.
+        """
         try:
             self._action = Action(action)
         except ValueError:
@@ -87,7 +124,17 @@ class Task:
         return self
 
     def with_coeff_removal(self, coeff: float | None) -> Task:
-        """Zero Hadamard matrix entries at or below ``coeff`` (see transforms)."""
+        """Enable the second, independent lossy knob.
+
+        Args:
+            coeff: Threshold at or below which Hadamard matrix entries are
+                zeroed during construction, or ``None`` to leave the matrix
+                intact. See :class:`~walsh.transforms.WalshHadamardTransform`
+                for how the comparison behaves.
+
+        Returns:
+            This task, so calls can be chained.
+        """
         self._coeff_removal = coeff
         return self
 
@@ -95,13 +142,32 @@ class Task:
 
     @staticmethod
     def _get_padding_size(x: int, a: int) -> int:
-        """How much to add to ``x`` to reach the next multiple of ``a``."""
+        """Work out how much padding reaches the next multiple of ``a``.
+
+        Args:
+            x: The current size.
+            a: The block size to align to.
+
+        Returns:
+            The number of elements to append, zero if ``x`` already fits.
+        """
         return ((x - 1) // a + 1) * a - x
 
     def _slice(
         self, values: Sequence[float], width: int, height: int, block_size: int
     ) -> list[Block]:
-        """Reshape a flat channel into zero-padded ``block_size`` square blocks."""
+        """Reshape a flat channel into zero-padded square blocks.
+
+        Args:
+            values: One channel's samples, row-major, ``width * height`` long.
+            width: Image width in pixels.
+            height: Image height in pixels.
+            block_size: Edge length of the blocks to cut.
+
+        Returns:
+            The blocks in row-major order, each ``block_size`` square. The
+            image is zero-padded up to a whole number of blocks first.
+        """
         plane = np.asarray(values, dtype=np.float64).reshape(height, width)
 
         height_padding = self._get_padding_size(height, block_size)
@@ -125,7 +191,18 @@ class Task:
 
     @staticmethod
     def _merge(blocks: Sequence[Block], width: int, height: int) -> Block:
-        """Reassemble blocks into a plane and crop the padding back off."""
+        """Reassemble blocks into a plane and crop the padding back off.
+
+        The inverse of :meth:`_slice`.
+
+        Args:
+            blocks: Blocks in the row-major order :meth:`_slice` produced.
+            width: Width to crop back to.
+            height: Height to crop back to.
+
+        Returns:
+            The reassembled plane, of shape ``(height, width)``.
+        """
         _, block_width = blocks[0].shape
         blocks_per_row = (width - 1) // block_width + 1
         blocks_per_column = len(blocks) // blocks_per_row
@@ -138,14 +215,23 @@ class Task:
     # -- pipelines -------------------------------------------------------
 
     def compress(self) -> None:
-        """BMP in, spectral ``.cim`` out."""
+        """Read a raster image, transform it, and write a spectral ``.cim``.
+
+        The input format is chosen from the filename suffix, so this reads BMP
+        or PPM without being told which.
+
+        Raises:
+            UnsupportedFileFormatError: If the input suffix is unknown, or the
+                file is not valid for its format.
+            OSError: If either file cannot be opened.
+        """
         log.info("compressing %s -> %s", self._input, self._output)
 
-        bmp_image = BMPImage()
-        bmp_image.load(self._input)
+        source_image = reader_for(self._input)
+        source_image.load(self._input)
 
-        width, height = bmp_image.get_dimensions()
-        data = bmp_image.get_raw_data()
+        width, height = source_image.get_dimensions()
+        data = source_image.get_raw_data()
 
         color = RgbColorModel()
         y, cb, cr = zip(*(color.get_y_cb_cr(pixel) for pixel in data), strict=True)
@@ -174,7 +260,16 @@ class Task:
         customizable_image.save(self._output)
 
     def extract(self) -> None:
-        """Spectral ``.cim`` in, BMP out."""
+        """Read a spectral ``.cim``, invert the transform, and write a raster image.
+
+        The output format is chosen from the filename suffix, so the picture can
+        come back as a different format from the one it went in as.
+
+        Raises:
+            UnsupportedFileFormatError: If the output suffix is unknown.
+            struct.error: If the ``.cim`` file is truncated or malformed.
+            OSError: If either file cannot be opened.
+        """
         log.info("extracting %s -> %s", self._input, self._output)
 
         customizable_image = CustomizableImage.load(self._input)
@@ -202,10 +297,10 @@ class Task:
             for triple in zip(planes["y"], planes["cb"], planes["cr"], strict=True)
         ]
 
-        bmp_image = BMPImage()
-        bmp_image.set_dimensions(width, height)
-        bmp_image.set_raw_data(pixels)
-        bmp_image.save(self._output)
+        output_image = reader_for(self._output)
+        output_image.set_dimensions(width, height)
+        output_image.set_raw_data(pixels)
+        output_image.save(self._output)
 
     _ACTIONS: ClassVar[dict[Action, Callable[[Task], None]]] = {
         Action.COMPRESS: compress,
@@ -213,7 +308,14 @@ class Task:
     }
 
     def run(self) -> None:
-        """Execute the configured action. Raises if none was selected."""
+        """Execute the configured action.
+
+        Raises:
+            ValueError: If :meth:`with_action` was never called.
+            UnsupportedFileFormatError: If an input or output format is not
+                supported.
+            OSError: If a file cannot be read or written.
+        """
         if self._action is None:
             raise ValueError("no action selected; call with_action() first")
         log.debug(

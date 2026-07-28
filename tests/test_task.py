@@ -5,12 +5,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from walsh.image import BMPImage
+from walsh.exceptions import UnsupportedFileFormatError
+from walsh.image import BMPImage, reader_for
 from walsh.task import Action, Task
 
 
 def _pixels(path: Path) -> np.ndarray:
-    image = BMPImage()
+    image = reader_for(path)
     image.load(str(path))
     return np.asarray(image.get_raw_data(), dtype=float)
 
@@ -105,3 +106,75 @@ def test_builder_methods_return_self() -> None:
     assert task.with_output("b") is task
     assert task.with_coeff_removal(0.1) is task
     assert task.with_action("compress") is task
+
+
+def test_bmp_and_ppm_sources_compress_identically(tmp_path: Path) -> None:
+    """The shared RGB contract means the source format cannot change the result."""
+    from conftest import gradient_pixels, write_bmp, write_ppm
+
+    pixels = gradient_pixels(16, 16)
+    bmp = write_bmp(tmp_path / "same.bmp", 16, 16, pixels)
+    ppm = write_ppm(tmp_path / "same.ppm", 16, 16, pixels)
+
+    from_bmp = tmp_path / "from_bmp.cim"
+    from_ppm = tmp_path / "from_ppm.cim"
+    Task().with_action("compress").with_input(str(bmp)).with_output(str(from_bmp)).run()
+    Task().with_action("compress").with_input(str(ppm)).with_output(str(from_ppm)).run()
+
+    assert from_bmp.read_bytes() == from_ppm.read_bytes()
+
+
+def test_ppm_roundtrips_through_the_codec(gradient_ppm: Path, tmp_path: Path) -> None:
+    compressed = tmp_path / "p.cim"
+    restored = tmp_path / "back.ppm"
+    Task().with_action("compress").with_input(str(gradient_ppm)).with_output(str(compressed)).run()
+    Task().with_action("extract").with_input(str(compressed)).with_output(str(restored)).run()
+
+    before, after = _pixels(gradient_ppm), _pixels(restored)
+    assert before.shape == after.shape
+    assert np.abs(before - after).mean() < 24
+
+
+def test_cross_format_conversion_preserves_the_picture(gradient_bmp: Path, tmp_path: Path) -> None:
+    """Compress from BMP, extract to PPM: same picture, not flipped or swapped."""
+    compressed = tmp_path / "x.cim"
+    as_ppm = tmp_path / "out.ppm"
+    as_bmp = tmp_path / "out.bmp"
+
+    Task().with_action("compress").with_input(str(gradient_bmp)).with_output(str(compressed)).run()
+    Task().with_action("extract").with_input(str(compressed)).with_output(str(as_ppm)).run()
+    Task().with_action("extract").with_input(str(compressed)).with_output(str(as_bmp)).run()
+
+    from walsh.image import BMPImage, PPMImage
+
+    ppm_image, bmp_image = PPMImage(), BMPImage()
+    ppm_image.load(str(as_ppm))
+    bmp_image.load(str(as_bmp))
+    assert ppm_image.get_raw_data() == bmp_image.get_raw_data()
+
+
+def test_unknown_output_format_is_rejected(gradient_bmp: Path, tmp_path: Path) -> None:
+    compressed = tmp_path / "u.cim"
+    Task().with_action("compress").with_input(str(gradient_bmp)).with_output(str(compressed)).run()
+
+    task = Task().with_action("extract").with_input(str(compressed))
+    with pytest.raises(UnsupportedFileFormatError, match="unsupported image format"):
+        task.with_output(str(tmp_path / "out.jpg")).run()
+
+
+def test_sample_ppm_compresses_and_survives_the_round_trip(
+    sample_ppm: Path, tmp_path: Path
+) -> None:
+    """The checked-in Blue Marble photo, end to end through the real codec."""
+    compressed = tmp_path / "earth.cim"
+    restored = tmp_path / "earth.ppm"
+    Task().with_action("compress").with_input(str(sample_ppm)).with_output(str(compressed)).run()
+    assert compressed.stat().st_size < sample_ppm.stat().st_size
+
+    Task().with_action("extract").with_input(str(compressed)).with_output(str(restored)).run()
+
+    before, after = _pixels(sample_ppm), _pixels(restored)
+    assert before.shape == after.shape
+    # A photograph, so less forgiving than the synthetic gradient, but the
+    # low-frequency corner still carries the picture.
+    assert np.abs(before - after).mean() < 20

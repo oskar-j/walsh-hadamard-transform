@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "walsh"
-version = "0.1.3"
+version = "0.2.0"
 description = "Image compression with the Walsh-Hadamard transform"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -12,7 +12,7 @@ license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Oskar Jarczyk", email = "oskar.jarczyk@gmail.com" }]
 maintainers = [{ name = "Oskar Jarczyk", email = "oskar.jarczyk@gmail.com" }]
-keywords = ["walsh", "hadamard", "transform", "image", "compression", "dsp"]
+keywords = ["walsh", "hadamard", "transform", "image", "compression", "dsp", "bmp", "ppm", "netpbm"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",

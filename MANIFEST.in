@@ -9,6 +9,8 @@ include requirements.txt requirements-demo.txt requirements-dev.txt
 recursive-include tests *.py
 recursive-include examples *.py
 
-# data/image.bmp is 480 KB and only feeds one test, which skips when the file
-# is absent. Keep it out of the distribution.
+# The sample images are ~480 KB each and only feed tests that skip when the
+# files are absent. Keep them out of the distribution.
 exclude data/*.bmp
+exclude data/*.ppm
+exclude data/*.cim

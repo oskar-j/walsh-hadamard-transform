@@ -24,16 +24,47 @@ class Transform(ABC):
 
     @abstractmethod
     def transform(self, src: Block) -> Block:
-        """Transform a single square block."""
+        """Transform a single square block.
+
+        Args:
+            src: A square 2-D array of samples.
+
+        Returns:
+            The block's spectrum, the same shape as ``src``.
+        """
 
     @abstractmethod
     def inverse_transform(self, src: Block) -> Block:
-        """Invert :meth:`transform` for a single square block."""
+        """Invert :meth:`transform` for a single square block.
+
+        Args:
+            src: A square 2-D spectrum.
+
+        Returns:
+            The reconstructed samples, the same shape as ``src``.
+        """
 
     def transform_sequence(self, src_seq: Iterable[Block]) -> list[Block]:
+        """Transform every block in a sequence.
+
+        Args:
+            src_seq: The blocks to transform.
+
+        Returns:
+            One spectrum per input block, in the same order. A list rather
+            than an iterator, because callers take its length.
+        """
         return [self.transform(block) for block in src_seq]
 
     def inverse_transform_sequence(self, src_seq: Iterable[Block]) -> list[Block]:
+        """Invert the transform for every block in a sequence.
+
+        Args:
+            src_seq: The spectra to invert.
+
+        Returns:
+            One reconstructed block per input, in the same order.
+        """
         return [self.inverse_transform(block) for block in src_seq]
 
 
@@ -49,6 +80,12 @@ class WalshHadamardTransform(Transform):
     """
 
     def __init__(self, coeff: float | None = None) -> None:
+        """Configure the transform.
+
+        Args:
+            coeff: Optional coefficient-removal threshold. ``None``, the
+                default, leaves the matrix intact.
+        """
         self._coeff = coeff
 
     @cached
@@ -59,6 +96,15 @@ class WalshHadamardTransform(Transform):
         entries whose row and column indices share a set bit, which yields the
         natural (Hadamard) ordering. Rows are then sorted by the number of
         sign changes to reach sequency (Walsh) ordering.
+
+        Memoised, so the cost is paid once per size per instance.
+
+        Args:
+            size: Edge length of the matrix. Must be a power of two.
+
+        Returns:
+            The ``size`` by ``size`` orthonormal matrix, rows in sequency
+            order.
         """
         n = int(math.log(size, 2))
         matrix = np.full((size, size), 1 / (np.sqrt(2) ** n), dtype=np.float64)
@@ -79,6 +125,18 @@ class WalshHadamardTransform(Transform):
         return matrix[np.argsort(_sign_changes(matrix), kind="stable")]
 
     def transform(self, src: Block) -> Block:
+        """Apply the transform to one square block.
+
+        Args:
+            src: A square 2-D array of samples.
+
+        Returns:
+            ``h @ src @ h``, where ``h`` is the sequency-ordered matrix of the
+            block's size.
+
+        Raises:
+            ValueError: If ``src`` is not a square 2-D array.
+        """
         src = np.asarray(src, dtype=np.float64)
         if src.ndim != 2 or src.shape[0] != src.shape[1]:
             raise ValueError(f"expected a square block, got shape {src.shape}")
@@ -87,10 +145,30 @@ class WalshHadamardTransform(Transform):
         return h @ src @ h
 
     def inverse_transform(self, src: Block) -> Block:
+        """Invert the transform, which for this transform means reapplying it.
+
+        The matrix is orthonormal and symmetric, so it is its own inverse.
+
+        Args:
+            src: A square 2-D spectrum.
+
+        Returns:
+            The reconstructed block.
+
+        Raises:
+            ValueError: If ``src`` is not a square 2-D array.
+        """
         return self.transform(src)
 
 
 def _sign_changes(matrix: Block) -> npt.NDArray[np.int64]:
-    """Count sign changes along each row -- the sequency of that Walsh function."""
+    """Count sign changes along each row, which is that row's sequency.
+
+    Args:
+        matrix: The matrix whose rows to measure.
+
+    Returns:
+        One count per row, in row order.
+    """
     counts: npt.NDArray[np.int64] = np.count_nonzero(matrix[:, 1:] * matrix[:, :-1] < 0, axis=1)
     return counts

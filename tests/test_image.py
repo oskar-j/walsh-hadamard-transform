@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from conftest import write_bmp
+from conftest import gradient_pixels, write_bmp
 from walsh.image import (
     BlockDescription,
     BMPImage,
@@ -124,3 +124,52 @@ def test_cim_file_size_matches_the_declared_layout(tmp_path: Path) -> None:
 def test_set_data_before_descriptions_is_an_error() -> None:
     with pytest.raises(ValueError, match="set_descriptions"):
         CustomizableImage().set_data([], [], [])
+
+
+def test_bmp_rows_come_back_top_down(tmp_path: Path) -> None:
+    """BMP stores rows bottom-up; the contract says top row first."""
+    width, height = 2, 3
+    pixels = [(row * 10, row * 10, row * 10) for row in range(height) for _ in range(width)]
+    source = write_bmp(tmp_path / "rows.bmp", width, height, pixels)
+
+    image = BMPImage()
+    image.load(str(source))
+    assert image.get_raw_data() == pixels
+    # The first stored row is the bottom one, so the file ends with the top row.
+    assert source.read_bytes()[-6:] == bytes([0, 0, 0, 0, 0, 0])
+
+
+def test_bmp_negative_height_means_top_down(tmp_path: Path) -> None:
+    """A negative header height marks a bitmap already stored top-down."""
+    width, height = 2, 2
+    pixels = [(1, 2, 3), (4, 5, 6), (7, 8, 9), (10, 11, 12)]
+
+    bottom_up = write_bmp(tmp_path / "bu.bmp", width, height, pixels)
+    raw = bytearray(bottom_up.read_bytes())
+
+    # Flip the sign of the height field and reverse the stored rows to match.
+    raw[22:26] = struct.pack("<i", -height)
+    body = raw[54:]
+    stride = align(width * 3, 4)
+    rows = [bytes(body[i : i + stride]) for i in range(0, len(body), stride)]
+    top_down = tmp_path / "td.bmp"
+    top_down.write_bytes(bytes(raw[:54]) + b"".join(reversed(rows)))
+
+    image = BMPImage()
+    image.load(str(top_down))
+    assert image.get_raw_data() == pixels
+
+
+def test_bmp_rejects_a_truncated_header(tmp_path: Path) -> None:
+    path = tmp_path / "short.bmp"
+    path.write_bytes(b"BM\x00\x00")
+    with pytest.raises(UnsupportedFileFormatError, match="truncated BMP header"):
+        BMPImage().load(str(path))
+
+
+def test_bmp_rejects_truncated_pixel_data(tmp_path: Path) -> None:
+    source = write_bmp(tmp_path / "full.bmp", 4, 4, gradient_pixels(4, 4))
+    truncated = tmp_path / "cut.bmp"
+    truncated.write_bytes(source.read_bytes()[:60])
+    with pytest.raises(UnsupportedFileFormatError, match="truncated BMP pixel data"):
+        BMPImage().load(str(truncated))
