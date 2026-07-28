@@ -1,0 +1,154 @@
+name: Release
+
+# Publishes a GitHub Release, then the same artifacts to PyPI, whenever a
+# version bump lands on master.
+#
+# The version in pyproject.toml is the single source of truth; the release is
+# tagged v<version> and its notes are taken from the matching CHANGELOG.md
+# section. Re-running on an already-released version is a no-op, so ordinary
+# pushes to master that do not change the version are safely ignored. This is
+# the only workable shape: PyPI permanently rejects a re-upload of a version it
+# already has, so "publish on every merge" has to mean "publish on every merge
+# that bumps the version".
+#
+# The PyPI upload is a dependent job rather than a separate workflow listening
+# for `release: published`. That is deliberate: releases created with the
+# default GITHUB_TOKEN do not trigger further workflow runs, so a
+# `release`-triggered workflow would never fire here.
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      force_publish:
+        description: "Retry the PyPI upload for the current version even though its GitHub Release already exists"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.check.outputs.publish }}
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      # Pinned exactly: setup-uv publishes major tags only up to v7, so a
+      # floating `@v9` does not resolve.
+      - name: Install uv
+        uses: astral-sh/setup-uv@v9.0.0
+
+      - name: Resolve version
+        id: version
+        run: |
+          VERSION=$(uv version --short)
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Resolved version ${VERSION}"
+
+      # `exists` gates creating the GitHub Release; `publish` gates building and
+      # uploading to PyPI. They differ only on a forced re-run, which exists so a
+      # failed PyPI upload can be retried without deleting and recreating the release.
+      - name: Decide what this run should do
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE_PUBLISH: ${{ inputs.force_publish }}
+        run: |
+          if gh release view "${{ steps.version.outputs.tag }}" >/dev/null 2>&1; then
+            EXISTS=true
+            echo "Release ${{ steps.version.outputs.tag }} already exists."
+          else
+            EXISTS=false
+          fi
+          echo "exists=${EXISTS}" >> "$GITHUB_OUTPUT"
+
+          if [ "${EXISTS}" = "false" ] || [ "${FORCE_PUBLISH}" = "true" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "Nothing to do."
+          fi
+
+      - name: Extract release notes from CHANGELOG.md
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          awk -v ver="${{ steps.version.outputs.version }}" '
+            $0 ~ "^## \\[" ver "\\]" { flag = 1; next }
+            flag && /^## \[/ { exit }
+            flag { print }
+          ' CHANGELOG.md > release_notes.md
+          if [ ! -s release_notes.md ]; then
+            echo "No CHANGELOG.md section found for ${{ steps.version.outputs.version }}." >&2
+            exit 1
+          fi
+          cat release_notes.md
+
+      # The release is the last gate before PyPI, and PyPI uploads cannot be
+      # undone, so prove the artifacts are sound before building them.
+      - name: Run the test suite
+        if: steps.check.outputs.publish == 'true'
+        run: uv run --group dev pytest -q
+
+      - name: Build distributions
+        if: steps.check.outputs.publish == 'true'
+        run: uv build
+
+      - name: Check the distribution metadata
+        if: steps.check.outputs.publish == 'true'
+        run: uvx twine check dist/*
+
+      # Hand the exact same artifacts to the PyPI job, rather than rebuilding
+      # them there, so what is on PyPI matches what is on the release.
+      - name: Upload distributions for the PyPI job
+        if: steps.check.outputs.publish == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+      - name: Create the GitHub Release
+        if: steps.check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.version.outputs.tag }}" \
+            --title "${{ steps.version.outputs.tag }}" \
+            --notes-file release_notes.md \
+            --target "${GITHUB_SHA}" \
+            dist/*
+
+  publish-pypi:
+    needs: release
+    if: needs.release.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+
+    environment:
+      name: pypi
+      url: https://pypi.org/p/walsh
+
+    # Trusted Publishing (OIDC) - no API token is stored in this repository.
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Download the distributions built for the release
+        uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # Makes a forced re-run safe if an earlier attempt uploaded some files.
+          skip-existing: true

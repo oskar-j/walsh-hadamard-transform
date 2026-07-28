@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+# setup-uv is pinned to an exact version rather than a floating major like the
+# other actions: it publishes major tags only up to v7, so `@v9` does not
+# resolve. Bump this deliberately when a new release lands.
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install the project and its dev dependencies
+        run: uv sync --group dev
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Check formatting
+        run: uv run ruff format --check .
+
+      - name: Type check
+        run: uv run mypy
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install the project and its dev dependencies
+        run: uv sync --group dev
+
+      - name: Run tests
+        run: uv run pytest -v
+
+  # Proves the sdist and wheel build and that their metadata is valid, so a
+  # release cannot be the first time we discover a packaging problem.
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v9.0.0
+
+      - name: Build distributions
+        run: uv build
+
+      - name: Check the distribution metadata
+        run: uvx twine check dist/*
+
+      # The wheel must work with numpy alone; matplotlib and Pillow are the
+      # `demo` extra and must not have become hard requirements.
+      - name: Smoke-test the wheel in a clean environment
+        run: |
+          uv venv /tmp/smoke
+          uv pip install --python /tmp/smoke/bin/python dist/*.whl
+          /tmp/smoke/bin/walsh --version
+          /tmp/smoke/bin/walsh compress data/image.bmp /tmp/smoke.cim
+          /tmp/smoke/bin/walsh extract /tmp/smoke.cim /tmp/smoke.bmp
+          # The codec is lossy, so a byte-identical result would mean the
+          # transform never ran. Anything else is the expected outcome.
+          if cmp -s data/image.bmp /tmp/smoke.bmp; then
+            echo "unexpected: round trip returned the input unchanged" >&2
+            exit 1
+          fi
+          test -s /tmp/smoke.cim
+          echo "wheel smoke test passed"

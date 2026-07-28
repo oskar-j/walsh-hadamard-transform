@@ -1,5 +1,10 @@
 # Walsh-hadamard transform
 
+[![PyPI](https://img.shields.io/pypi/v/walsh.svg)](https://pypi.org/project/walsh/)
+[![Python versions](https://img.shields.io/pypi/pyversions/walsh.svg)](https://pypi.org/project/walsh/)
+[![CI](https://github.com/oskar-j/walsh-hadamard-transform/actions/workflows/ci.yml/badge.svg)](https://github.com/oskar-j/walsh-hadamard-transform/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 Compressing images with a Hadamard transform
 
 ## Description
@@ -33,13 +38,33 @@ This code is partially based on the solution from [ktisha/python2012](https://gi
 Requires Python 3.10 or newer.
 
 ```
-pip install .
+pip install walsh
 ```
 
-For a development checkout, with the example script, tests and linters:
+or, with [uv](https://docs.astral.sh/uv/):
 
 ```
-pip install -e ".[demo,dev]"
+uv add walsh          # into a project
+uv tool install walsh # just the command line tool
+```
+
+The example script additionally needs matplotlib and Pillow, which are the
+`demo` extra: `pip install "walsh[demo]"`.
+
+### Development
+
+`uv.lock` is committed, so a checkout reproduces exactly the environment CI
+uses:
+
+```
+uv sync --group dev --all-extras
+```
+
+`--group dev` brings in pytest, ruff and mypy; `--all-extras` adds the `demo`
+extra so `examples/roundtrip.py` runs too. Without uv:
+
+```
+pip install -e ".[demo]" -r requirements-dev.txt
 ```
 
 ## How to run
@@ -82,14 +107,30 @@ are declared as the `demo` extra. Versions are pinned in `pyproject.toml`;
 `requirements.txt`, `requirements-demo.txt` and `requirements-dev.txt` mirror
 them for plain `pip install -r` workflows.
 
-## Development
+## Development commands
 
 ```
-pytest             # test suite
-ruff check .       # lint
-ruff format .      # format
-mypy               # strict type check
+uv run pytest              # test suite
+uv run ruff check .        # lint
+uv run ruff format .       # format
+uv run mypy                # strict type check
+uv build                   # sdist + wheel into dist/
 ```
+
+CI runs exactly these on every pull request, plus the test suite against
+Python 3.10 through 3.14.
+
+## Releasing
+
+The version in `pyproject.toml` is the single source of truth. To cut a
+release, bump it, add the matching `## [x.y.z]` section to `CHANGELOG.md`, and
+merge to `master`. The release workflow then tags `v<version>`, creates a
+GitHub Release with those notes, and publishes the sdist and wheel to
+[PyPI](https://pypi.org/project/walsh/) using Trusted Publishing — no API token
+is stored in this repository.
+
+Merges that do not change the version are a no-op, since PyPI permanently
+refuses to accept the same version twice.
 
 ## File format
 
