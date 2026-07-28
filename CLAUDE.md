@@ -9,6 +9,7 @@ uv-first; `uv.lock` is committed and CI syncs from it.
 ```
 uv sync --group dev --all-extras         # dev setup; requires Python 3.10+
 uv run pytest                            # full suite
+uv run pytest --cov --cov-report=term-missing   # with coverage (floor 90%)
 uv run pytest tests/test_task.py -k roundtrip   # single test / pattern
 uv run ruff check . && uv run ruff format .
 uv run mypy                              # strict; config selects the walsh package
@@ -90,6 +91,17 @@ construction, off by default.
   from the pre-port `data/recreated.bmp` by at most 2 per channel (mean 0.33).
 - **`_KWARGS_MARKER` in `decorators.py` must stay module level.** A per-call
   sentinel would make every cache lookup miss.
+
+## Coverage gate
+
+`[tool.coverage.report] fail_under = 90` with branch coverage on. Currently 97%,
+so there is headroom, but `--cov` is what applies the floor — a bare `pytest`
+does not. CI passes `--cov` on all five Python versions and those `test` jobs
+are required checks on `master`, so a coverage drop blocks the merge rather than
+just going red. `release.yml` applies the same floor before it builds.
+
+If you add a module that is genuinely untestable, prefer an `exclude_also`
+entry in `[tool.coverage.report]` over lowering the floor.
 
 ## Release pipeline
 

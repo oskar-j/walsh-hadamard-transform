@@ -93,10 +93,11 @@ jobs:
           cat release_notes.md
 
       # The release is the last gate before PyPI, and PyPI uploads cannot be
-      # undone, so prove the artifacts are sound before building them.
-      - name: Run the test suite
+      # undone, so prove the artifacts are sound before building them. The
+      # coverage floor applies here too: nothing under-tested reaches PyPI.
+      - name: Run the test suite with coverage
         if: steps.check.outputs.publish == 'true'
-        run: uv run --group dev pytest -q
+        run: uv run --group dev pytest -q --cov --cov-report=term-missing
 
       - name: Build distributions
         if: steps.check.outputs.publish == 'true'

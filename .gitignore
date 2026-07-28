@@ -106,3 +106,9 @@ venv.bak/
 # Project artefacts
 data/transformed.cim
 *.cim
+
+# Coverage
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
