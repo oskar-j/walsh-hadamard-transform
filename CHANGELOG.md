@@ -14,6 +14,13 @@ Release notes.
 ### Added
 
 - PyPI downloads and GitHub stars badges in the README.
+- A `walsh.exceptions` module holding the package's exception types and the
+  `EXPECTED_ERRORS` grouping, so that policy lives in one place rather than
+  inside the CLI. It imports nothing from the rest of the package, so any
+  module can use it without a cycle.
+- `WalshError`, a base class for every error the package raises on its own
+  behalf. `UnsupportedFileFormatError` now derives from it, so callers can
+  catch all package errors without also catching unrelated failures.
 
 ### Changed
 
@@ -29,6 +36,9 @@ Release notes.
 - `walsh.cli.main` is now a click group rather than a `main(argv) -> int`
   function. Programmatic callers should use `click.testing.CliRunner`, or call
   the `walsh.Task` API directly.
+- `UnsupportedFileFormatError` moved from `walsh.image` to `walsh.exceptions`.
+  Both `from walsh.image import UnsupportedFileFormatError` and
+  `from walsh import UnsupportedFileFormatError` keep working.
 
 ### Fixed
 

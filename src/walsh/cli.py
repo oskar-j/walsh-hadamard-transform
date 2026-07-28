@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import logging
-import struct
 
 import click
 
-from walsh.image import UnsupportedFileFormatError
+from walsh.exceptions import EXPECTED_ERRORS
 from walsh.task import (
     DEFAULT_CHROMA_BLOCK_SIZE,
     DEFAULT_PACKED_BLOCK_SIZE,
@@ -19,14 +18,6 @@ from walsh.task import (
 __all__ = ["main"]
 
 CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
-
-#: Exceptions a bad input file can reasonably raise. Anything else is a bug and
-#: should surface as a traceback rather than a tidy message.
-#:
-#: struct.error derives straight from Exception, not from ValueError, so it has
-#: to be listed explicitly: a file too short to hold a header reaches
-#: struct.unpack and would otherwise print a traceback at the user.
-_EXPECTED_ERRORS = (OSError, UnsupportedFileFormatError, ValueError, struct.error)
 
 _INPUT_FILE = click.Path(exists=True, dir_okay=False, readable=True)
 _OUTPUT_FILE = click.Path(dir_okay=False, writable=True)
@@ -41,7 +32,7 @@ def _run(task: Task) -> None:
     """
     try:
         task.run()
-    except _EXPECTED_ERRORS as error:
+    except EXPECTED_ERRORS as error:
         raise click.ClickException(str(error)) from error
 
 
