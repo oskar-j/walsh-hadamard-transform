@@ -37,12 +37,12 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v9
 
       - name: Resolve version
         id: version
@@ -108,7 +108,7 @@ jobs:
       # them there, so what is on PyPI matches what is on the release.
       - name: Upload distributions for the PyPI job
         if: steps.check.outputs.publish == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/
@@ -140,7 +140,7 @@ jobs:
 
     steps:
       - name: Download the distributions built for the release
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist/
