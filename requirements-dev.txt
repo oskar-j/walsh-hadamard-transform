@@ -1,0 +1,7 @@
+# Test and lint tooling. Equivalent to `pip install -e .[demo,dev]`.
+
+-r requirements-demo.txt
+
+pytest>=8.0,<10
+ruff>=0.6,<1
+mypy>=1.10,<2

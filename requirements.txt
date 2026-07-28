@@ -1,3 +1,8 @@
-numpy
-Pillow
-matplotlib
+# Runtime dependency of the `walsh` package itself.
+# Authoritative versions live in pyproject.toml; this file mirrors them so the
+# project can also be set up with a plain `pip install -r requirements.txt`.
+#
+# For the example script (examples/roundtrip.py) also install requirements-demo.txt.
+# For tests and linting, install requirements-dev.txt.
+
+numpy>=1.24,<3

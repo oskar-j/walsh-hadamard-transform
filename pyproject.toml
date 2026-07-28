@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=77.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "walsh"
+version = "0.1.0"
+description = "Image compression with the Walsh-Hadamard transform"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Oskar Jarczyk", email = "oskar.jarczyk@gmail.com" }]
+keywords = ["walsh", "hadamard", "transform", "image", "compression", "dsp"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Graphics",
+    "Topic :: Scientific/Engineering :: Image Processing",
+]
+dependencies = ["numpy>=1.24,<3"]
+
+[project.optional-dependencies]
+# Only the example script needs these; the package itself parses BMP by hand.
+demo = ["matplotlib>=3.7,<4", "Pillow>=10.0,<13"]
+dev = ["pytest>=8.0,<10", "ruff>=0.6,<1", "mypy>=1.10,<2"]
+
+[project.scripts]
+walsh = "walsh.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/oskar-j/walsh-hadamard-transform"
+Repository = "https://github.com/oskar-j/walsh-hadamard-transform"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+walsh = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+# No python_version pin: numpy's bundled stubs require mypy to target 3.12+.
+# Minimum-version compatibility is enforced by ruff's target-version instead.
+packages = ["walsh"]
+strict = true
