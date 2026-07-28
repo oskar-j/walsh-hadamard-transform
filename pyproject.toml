@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "walsh"
-version = "0.1.1"
+version = "0.1.2"
 description = "Image compression with the Walsh-Hadamard transform"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -48,6 +48,7 @@ Changelog = "https://github.com/oskar-j/walsh-hadamard-transform/blob/master/CHA
 [dependency-groups]
 dev = [
     "pytest>=8.0,<10",
+    "pytest-cov>=5.0,<8",
     "ruff>=0.6,<1",
     "mypy>=1.10,<2",
     "build>=1.2,<2",
@@ -61,7 +62,27 @@ walsh = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Coverage is opt-in via --cov so a plain `pytest` stays fast; CI always passes it.
 addopts = "-ra"
+
+[tool.coverage.run]
+source = ["src/walsh"]
+branch = true
+
+[tool.coverage.report]
+# CI enforces this on every matrix job, and those jobs are required checks on
+# master, so a pull request cannot lower coverage below it. The README badge
+# states this floor rather than a number that would drift.
+fail_under = 90
+show_missing = true
+exclude_also = [
+    # Script entry points are exercised by running the command, not by importing it.
+    'if __name__ == .__main__.:',
+    # Abstract method bodies declare a signature and have nothing to run.
+    '^\s*\.\.\.$',
+    # Typing-only imports never execute at runtime.
+    'if TYPE_CHECKING:',
+]
 
 [tool.ruff]
 line-length = 100

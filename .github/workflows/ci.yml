@@ -51,8 +51,19 @@ jobs:
       - name: Install the project and its dev dependencies
         run: uv sync --group dev
 
-      - name: Run tests
-        run: uv run pytest -v
+      # --cov applies the fail_under threshold from [tool.coverage.report] in
+      # pyproject.toml, so a pull request that drops coverage below 90% fails
+      # here and cannot be merged - the `test` jobs are required checks on master.
+      - name: Run tests with coverage
+        run: uv run pytest -v --cov --cov-report=term-missing --cov-report=xml
+
+      - name: Upload the coverage report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-${{ matrix.python-version }}
+          path: coverage.xml
+          if-no-files-found: warn
 
   # Proves the sdist and wheel build and that their metadata is valid, so a
   # release cannot be the first time we discover a packaging problem.

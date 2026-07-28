@@ -3,6 +3,7 @@
 [![PyPI](https://img.shields.io/pypi/v/walsh.svg)](https://pypi.org/project/walsh/)
 [![Python versions](https://img.shields.io/pypi/pyversions/walsh.svg)](https://pypi.org/project/walsh/)
 [![CI](https://github.com/oskar-j/walsh-hadamard-transform/actions/workflows/ci.yml/badge.svg)](https://github.com/oskar-j/walsh-hadamard-transform/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/badge/coverage-%E2%89%A5%2090%25-brightgreen)](https://github.com/oskar-j/walsh-hadamard-transform/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Compressing images with a Hadamard transform
@@ -110,15 +111,26 @@ them for plain `pip install -r` workflows.
 ## Development commands
 
 ```
-uv run pytest              # test suite
-uv run ruff check .        # lint
-uv run ruff format .       # format
-uv run mypy                # strict type check
-uv build                   # sdist + wheel into dist/
+uv run pytest                          # test suite
+uv run pytest --cov --cov-report=term-missing   # with coverage
+uv run ruff check .                    # lint
+uv run ruff format .                   # format
+uv run mypy                            # strict type check
+uv build                               # sdist + wheel into dist/
 ```
 
 CI runs exactly these on every pull request, plus the test suite against
 Python 3.10 through 3.14.
+
+### Coverage
+
+Coverage is measured with branch coverage on, and **CI enforces a floor of 90%
+on every supported Python version**. A pull request that drops below it fails
+the `test` jobs, which are required checks on `master` — so the badge above
+states what is actually guaranteed rather than a number that could drift.
+
+Coverage is opt-in locally (`--cov`) so a plain `pytest` stays fast; CI always
+passes it.
 
 ## Releasing
 
