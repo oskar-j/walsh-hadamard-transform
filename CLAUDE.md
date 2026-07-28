@@ -4,14 +4,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
+uv-first; `uv.lock` is committed and CI syncs from it.
+
 ```
-pip install -e ".[demo,dev]"   # dev setup; requires Python 3.10+
-pytest                          # full suite
-pytest tests/test_task.py -k roundtrip   # single test / pattern
-ruff check . && ruff format .   # lint + format
-mypy                            # strict; config selects the walsh package
-python -m build                 # sdist + wheel
+uv sync --group dev --all-extras         # dev setup; requires Python 3.10+
+uv run pytest                            # full suite
+uv run pytest tests/test_task.py -k roundtrip   # single test / pattern
+uv run ruff check . && uv run ruff format .
+uv run mypy                              # strict; config selects the walsh package
+uv build                                 # sdist + wheel
+uv version --short                       # what release.yml reads
 ```
+
+`dev` is a PEP 735 dependency group, not an extra — `pip install .[dev]` does
+not work. `demo` is a real extra (matplotlib + Pillow, for
+`examples/roundtrip.py`), so `--all-extras` is needed to run the example.
 
 Run the codec end to end:
 
@@ -84,8 +91,25 @@ construction, off by default.
 - **`_KWARGS_MARKER` in `decorators.py` must stay module level.** A per-call
   sentinel would make every cache lookup miss.
 
+## Release pipeline
+
+`pyproject.toml`'s version is the single source of truth. `.github/workflows/release.yml`
+fires on every push to `master`, reads `uv version --short`, and does nothing if
+a `v<version>` GitHub Release already exists. Otherwise it extracts the matching
+`## [x.y.z]` section from `CHANGELOG.md` (failing loudly if absent), runs the
+tests, builds, creates the Release, and publishes to PyPI via Trusted Publishing
+in the `pypi` GitHub environment — no API token in the repo.
+
+So: cutting a release means bumping the version *and* adding its CHANGELOG
+section in the same merge. The `## [x.y.z]` headings are load-bearing.
+
+`MANIFEST.in` controls the sdist. It exists mainly because setuptools ships
+`tests/test_*.py` but not `tests/conftest.py`, which would produce a sdist whose
+tests all error on missing fixtures.
+
 ## History
 
 Ported from Python 2.7 in v0.1.0; the old `fal/` package and root
-`transform.py` were removed. Partially based on
+`transform.py` were removed. v0.1.1 added uv support and the release pipeline.
+Partially based on
 https://github.com/ktisha/python2012/tree/dee4beda8e22f3a66a3e31384d4b72ab66102e88/avereshchagin

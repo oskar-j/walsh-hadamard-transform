@@ -4,13 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "walsh"
-version = "0.1.0"
+version = "0.1.1"
 description = "Image compression with the Walsh-Hadamard transform"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Oskar Jarczyk", email = "oskar.jarczyk@gmail.com" }]
+maintainers = [{ name = "Oskar Jarczyk", email = "oskar.jarczyk@gmail.com" }]
 keywords = ["walsh", "hadamard", "transform", "image", "compression", "dsp"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -21,15 +22,16 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Multimedia :: Graphics",
     "Topic :: Scientific/Engineering :: Image Processing",
 ]
 dependencies = ["numpy>=1.24,<3"]
 
 [project.optional-dependencies]
-# Only the example script needs these; the package itself parses BMP by hand.
+# A real extra, because `pip install walsh[demo]` is something a user may want:
+# it is what examples/roundtrip.py needs. The package itself parses BMP by hand.
 demo = ["matplotlib>=3.7,<4", "Pillow>=10.0,<13"]
-dev = ["pytest>=8.0,<10", "ruff>=0.6,<1", "mypy>=1.10,<2"]
 
 [project.scripts]
 walsh = "walsh.cli:main"
@@ -37,6 +39,19 @@ walsh = "walsh.cli:main"
 [project.urls]
 Homepage = "https://github.com/oskar-j/walsh-hadamard-transform"
 Repository = "https://github.com/oskar-j/walsh-hadamard-transform"
+Issues = "https://github.com/oskar-j/walsh-hadamard-transform/issues"
+Changelog = "https://github.com/oskar-j/walsh-hadamard-transform/blob/master/CHANGELOG.md"
+
+# PEP 735 groups rather than extras: these are for working on the project, not
+# for installing it. `uv sync --group dev` pulls them in; pip 25.1+ can too,
+# with `pip install --group dev`.
+[dependency-groups]
+dev = [
+    "pytest>=8.0,<10",
+    "ruff>=0.6,<1",
+    "mypy>=1.10,<2",
+    "build>=1.2,<2",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

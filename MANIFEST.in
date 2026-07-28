@@ -1,0 +1,14 @@
+# Controls what lands in the sdist. The wheel is driven by
+# [tool.setuptools.packages.find] in pyproject.toml instead.
+#
+# setuptools picks up tests/test_*.py on its own but not conftest.py, which
+# would ship a test suite whose fixtures are all undefined.
+
+include CHANGELOG.md
+include requirements.txt requirements-demo.txt requirements-dev.txt
+recursive-include tests *.py
+recursive-include examples *.py
+
+# data/image.bmp is 480 KB and only feeds one test, which skips when the file
+# is absent. Keep it out of the distribution.
+exclude data/*.bmp
