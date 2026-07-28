@@ -160,3 +160,21 @@ def test_unknown_output_format_is_rejected(gradient_bmp: Path, tmp_path: Path) -
     task = Task().with_action("extract").with_input(str(compressed))
     with pytest.raises(UnsupportedFileFormatError, match="unsupported image format"):
         task.with_output(str(tmp_path / "out.jpg")).run()
+
+
+def test_sample_ppm_compresses_and_survives_the_round_trip(
+    sample_ppm: Path, tmp_path: Path
+) -> None:
+    """The checked-in Blue Marble photo, end to end through the real codec."""
+    compressed = tmp_path / "earth.cim"
+    restored = tmp_path / "earth.ppm"
+    Task().with_action("compress").with_input(str(sample_ppm)).with_output(str(compressed)).run()
+    assert compressed.stat().st_size < sample_ppm.stat().st_size
+
+    Task().with_action("extract").with_input(str(compressed)).with_output(str(restored)).run()
+
+    before, after = _pixels(sample_ppm), _pixels(restored)
+    assert before.shape == after.shape
+    # A photograph, so less forgiving than the synthetic gradient, but the
+    # low-frequency corner still carries the picture.
+    assert np.abs(before - after).mean() < 20

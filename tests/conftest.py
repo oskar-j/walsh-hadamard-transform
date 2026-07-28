@@ -95,8 +95,23 @@ def gradient_ppm(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def sample_bmp() -> Path:
-    """The 400x400 sample image checked into the repository."""
-    path = DATA_DIR / "image.bmp"
+    """The 400x400 sample bitmap checked into the repository."""
+    return _sample("image.bmp")
+
+
+@pytest.fixture
+def sample_ppm() -> Path:
+    """The 400x400 sample pixmap checked into the repository."""
+    return _sample("earth.ppm")
+
+
+def _sample(name: str) -> Path:
+    """Return a checked-in sample image, skipping if it is not present.
+
+    The samples are excluded from the sdist, so a test run against an unpacked
+    distribution has to cope with them being missing.
+    """
+    path = DATA_DIR / name
     if not path.exists():  # pragma: no cover
         pytest.skip(f"sample image missing: {path}")
     return path

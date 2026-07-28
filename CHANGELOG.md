@@ -27,6 +27,10 @@ Release notes.
   being read as a huge unsigned number.
 - Method-level docstrings across `src/walsh`, with `Args:`, `Returns:` and
   `Raises:` sections wherever they apply.
+- `data/earth.ppm`, a 400x400 P6 sample: NASA's Apollo 17 "Blue Marble"
+  photograph, public domain, from Wikimedia Commons. Provenance and the
+  conversion recipe are recorded in `data/README.md`. Like the other samples it
+  is excluded from the sdist.
 
 ### Changed
 
