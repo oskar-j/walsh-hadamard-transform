@@ -32,6 +32,10 @@ python examples/roundtrip.py    # same thing plus matplotlib plots
 The local `.venv` is Python 3.12. `walsh` is installed as a console script
 (`walsh.cli:main`).
 
+`cli.py` uses **click**, not argparse. `main` is a `click.group` with `compress`
+and `extract` subcommands, so tests drive it through `click.testing.CliRunner`
+rather than calling `main(argv)` — it no longer returns an int.
+
 ## Layout
 
 `src/` layout, package name `walsh`, built with setuptools. Tests import the
@@ -65,6 +69,14 @@ matrix and sorts its rows by sign-change count for sequency (Walsh) ordering.
 
 **`decorators.py`** — `cached`, an unbounded memo keyed on arguments, falling
 back to `repr()` for unhashable ones (which `functools.lru_cache` cannot do).
+
+**`exceptions.py`** — `WalshError` (base), `UnsupportedFileFormatError`, and
+`EXPECTED_ERRORS`, the tuple the CLI converts into a clean `ClickException`.
+It must keep importing nothing from the rest of the package, so every module can
+use it without a cycle; `image.py` re-exports `UnsupportedFileFormatError` for
+back-compat. `EXPECTED_ERRORS` lists `struct.error` explicitly because that
+derives from `Exception`, not `ValueError` — dropping it reintroduces a
+traceback on truncated input.
 
 ### Where the compression happens
 

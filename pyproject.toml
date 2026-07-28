@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "walsh"
-version = "0.1.2"
+version = "0.1.3"
 description = "Image compression with the Walsh-Hadamard transform"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -26,7 +26,7 @@ classifiers = [
     "Topic :: Multimedia :: Graphics",
     "Topic :: Scientific/Engineering :: Image Processing",
 ]
-dependencies = ["numpy>=1.24,<3"]
+dependencies = ["numpy>=1.24,<3", "click>=8.1,<9"]
 
 [project.optional-dependencies]
 # A real extra, because `pip install walsh[demo]` is something a user may want:

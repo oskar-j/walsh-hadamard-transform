@@ -13,12 +13,8 @@ from __future__ import annotations
 from importlib.metadata import PackageNotFoundError, version
 
 from walsh.colors import ColorModel, RgbColorModel, YCbCrColorModel
-from walsh.image import (
-    BlockDescription,
-    BMPImage,
-    CustomizableImage,
-    UnsupportedFileFormatError,
-)
+from walsh.exceptions import UnsupportedFileFormatError, WalshError
+from walsh.image import BlockDescription, BMPImage, CustomizableImage
 from walsh.task import Action, Task
 from walsh.transforms import Transform, WalshHadamardTransform
 
@@ -37,6 +33,7 @@ __all__ = [
     "Task",
     "Transform",
     "UnsupportedFileFormatError",
+    "WalshError",
     "WalshHadamardTransform",
     "YCbCrColorModel",
     "__version__",

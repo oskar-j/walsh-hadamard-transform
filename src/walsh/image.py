@@ -13,6 +13,10 @@ from typing import BinaryIO, NamedTuple
 import numpy as np
 import numpy.typing as npt
 
+from walsh.exceptions import UnsupportedFileFormatError
+
+# Re-exported so `from walsh.image import UnsupportedFileFormatError` keeps
+# working; it is defined in walsh.exceptions.
 __all__ = [
     "BMPImage",
     "BlockDescription",
@@ -37,10 +41,6 @@ BMP_PIXEL_OFFSET = 54
 COEFF_DTYPE = np.dtype("<i2")
 COEFF_MIN = np.iinfo(COEFF_DTYPE).min
 COEFF_MAX = np.iinfo(COEFF_DTYPE).max
-
-
-class UnsupportedFileFormatError(Exception):
-    """Raised for BMP files that are not 24-bit, single-plane, uncompressed."""
 
 
 def align(x: int, a: int) -> int:

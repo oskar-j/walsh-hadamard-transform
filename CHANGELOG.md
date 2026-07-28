@@ -9,6 +9,44 @@ The `## [x.y.z]` headings are load-bearing: the release workflow extracts the
 section matching the version in `pyproject.toml` and uses it as the GitHub
 Release notes.
 
+## [0.1.3]
+
+### Added
+
+- PyPI downloads and GitHub stars badges in the README.
+- A `walsh.exceptions` module holding the package's exception types and the
+  `EXPECTED_ERRORS` grouping, so that policy lives in one place rather than
+  inside the CLI. It imports nothing from the rest of the package, so any
+  module can use it without a cycle.
+- `WalshError`, a base class for every error the package raises on its own
+  behalf. `UnsupportedFileFormatError` now derives from it, so callers can
+  catch all package errors without also catching unrelated failures.
+
+### Changed
+
+- The command line interface moved from `argparse` to
+  [click](https://click.palletsprojects.com/). `click>=8.1,<9` is now a runtime
+  dependency. The command surface is unchanged -- `walsh compress` and
+  `walsh extract` take the same arguments and options and produce byte-identical
+  output -- but there are three visible differences:
+  - `-h` now works as well as `--help`.
+  - A missing input file exits `2` (a usage error) rather than `1`, and is
+    reported by click before the task starts.
+  - Error messages are prefixed `Error:` rather than `walsh:`.
+- `walsh.cli.main` is now a click group rather than a `main(argv) -> int`
+  function. Programmatic callers should use `click.testing.CliRunner`, or call
+  the `walsh.Task` API directly.
+- `UnsupportedFileFormatError` moved from `walsh.image` to `walsh.exceptions`.
+  Both `from walsh.image import UnsupportedFileFormatError` and
+  `from walsh import UnsupportedFileFormatError` keep working.
+
+### Fixed
+
+- An input file too short to hold a header raised `struct.error`, which was not
+  caught and printed a traceback. `struct.error` derives from `Exception` rather
+  than `ValueError`, so it slipped past the handler. It now reports a clean
+  error and exits `1`. This affected the `argparse` interface too.
+
 ## [0.1.2]
 
 ### Added
@@ -83,6 +121,7 @@ alters every compressed output:
   any non-`None` coefficient above `-1/sqrt(2)**n` zeroes essentially the whole
   spectrum.
 
+[0.1.3]: https://github.com/oskar-j/walsh-hadamard-transform/releases/tag/v0.1.3
 [0.1.2]: https://github.com/oskar-j/walsh-hadamard-transform/releases/tag/v0.1.2
 [0.1.1]: https://github.com/oskar-j/walsh-hadamard-transform/releases/tag/v0.1.1
 [0.1.0]: https://github.com/oskar-j/walsh-hadamard-transform/releases/tag/v0.1.0
