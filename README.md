@@ -79,6 +79,14 @@ walsh compress data/image.bmp data/transformed.cim
 walsh extract  data/transformed.cim data/recreated.bmp
 ```
 
+The format is taken from the filename suffix, so PPM works the same way, and a
+picture can be compressed from one format and restored as another:
+
+```
+walsh compress photo.ppm out.cim
+walsh extract  out.cim restored.bmp     # PPM in, BMP out
+```
+
 `compress` accepts `--packed-block-size` (how many low-frequency coefficients
 per axis to keep -- lower is smaller and lossier), `--y-block-size`,
 `--chroma-block-size` and `--coeff-removal`. Add `-v`/`-vv` for progress
@@ -151,12 +159,31 @@ is stored in this repository.
 Merges that do not change the version are a no-op, since PyPI permanently
 refuses to accept the same version twice.
 
-## File format
+## File formats
+
+### Input and output
+
+| Suffix | Format | Notes |
+| --- | --- | --- |
+| `.bmp` | Windows bitmap | 24-bit, single plane, uncompressed. Top-down (negative height) files are understood. |
+| `.ppm`, `.pnm` | Netpbm portable pixmap | `P6` binary and `P3` ASCII are read; `P6` is written. Header comments are skipped and a `maxval` below 255 is rescaled. 16-bit samples are rejected. |
+
+Every reader presents the same in-memory view -- RGB pixels, top row first --
+whatever the file itself stores. BMP is the awkward one on both counts, storing
+blue-green-red samples in bottom-up rows, and `BMPImage` converts in each
+direction. That shared contract is what makes cross-format conversion work.
+
+### The `.cim` container
 
 `compress` writes a `.cim` file: an atypical, project-specific container, so
 most commercial tools will not be able to read it. It stores the image
 dimensions, three block-layout descriptions (Y, Cb, Cr), and the retained
 Walsh-Hadamard coefficients as little-endian `int16`.
+
+> **Note.** `.cim` files written by 0.1.x are not compatible with 0.2.0. The
+> in-memory pixel contract changed, so an old file extracted with 0.2.0 comes
+> back with red and blue swapped and vertically flipped. Re-compress from the
+> source image instead.
 
 ## Effects
 

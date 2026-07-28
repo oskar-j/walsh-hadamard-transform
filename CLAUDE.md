@@ -54,11 +54,20 @@ enum, dispatched through the `Task._ACTIONS` ClassVar; adding an action means
 adding a method *and* an entry there. Block sizes are constructor kwargs
 defaulting to the original values (Y 8, chroma 16, packed 4).
 
-**`image.py`** — `BMPImage` hand-parses/writes 24-bit uncompressed BMP with
-`struct`. `CustomizableImage` is the custom `.cim` container: `<II` dimensions,
-three `<HHH` `BlockDescription` records (Y, Cb, Cr), then coefficients as
-little-endian `int16`. Channel dicts are keyed `"y"`, `"cb"`, `"cr"` and rely on
-dict insertion order matching the on-disk order.
+**`image/`** — a package, one submodule per format. `base.py` defines
+`RasterImage` and **the contract that matters: RGB pixels, top row first,
+whatever the file stores**. `bmp.py` converts both ways (BMP is blue-green-red
+and bottom-up); `ppm.py` needs no conversion. `cim.py` holds
+`CustomizableImage`, the `.cim` container: `<II` dimensions, three `<HHH`
+`BlockDescription` records (Y, Cb, Cr), then coefficients as little-endian
+`int16` — its channel dicts are keyed `"y"`, `"cb"`, `"cr"` and rely on dict
+insertion order matching the on-disk order. `_io.py` has `align` and
+`open_binary`. `__init__.py` re-exports everything the pre-0.2.0 single module
+exported, so old imports still work, and owns `reader_for`, which dispatches on
+filename suffix.
+
+Adding a format means a new submodule subclassing `RasterImage` plus an entry in
+`SUFFIXES`. Honour the RGB top-down contract there, not in `Task`.
 
 **`transforms.py`** — `WalshHadamardTransform` builds an orthonormal Hadamard
 matrix and sorts its rows by sign-change count for sequency (Walsh) ordering.
@@ -90,10 +99,6 @@ construction, off by default.
 
 ## Known quirks — do not "fix" casually
 
-- **`BMPImage` pixel triples are in file order, which for BMP is B, G, R.**
-  `Task` treats them as R, G, B. Read and write use the same order so round
-  trips are exact, but the YCbCr weights land on swapped channels. Correcting
-  this changes every compressed output.
 - **The `coeff` comparison in `WalshHadamardTransform._build_matrix` is
   one-sided** (`value - coeff < tol`, not on the magnitude). Preserved verbatim
   from the Python 2 original; in practice any non-`None` coeff above
@@ -131,9 +136,21 @@ section in the same merge. The `## [x.y.z]` headings are load-bearing.
 `tests/test_*.py` but not `tests/conftest.py`, which would produce a sdist whose
 tests all error on missing fixtures.
 
+## Docstring style
+
+Google sections (`Args:` / `Returns:` / `Raises:`) on every method in
+`src/walsh`, including private ones, matching the `thresher` repo. Include the
+sections that apply and omit the ones that do not — no empty `Args:` on a
+no-argument method.
+
 ## History
 
 Ported from Python 2.7 in v0.1.0; the old `fal/` package and root
 `transform.py` were removed. v0.1.1 added uv support and the release pipeline.
+v0.1.2 added the coverage gate, v0.1.3 moved the CLI to click, and **v0.2.0
+added PPM, split `image.py` into a package, and fixed the BGR/bottom-up quirk**
+by making RGB top-down the shared in-memory contract. That last change makes
+0.1.x `.cim` files incompatible: extracting one with 0.2.0 swaps red and blue
+and flips the image.
 Partially based on
 https://github.com/ktisha/python2012/tree/dee4beda8e22f3a66a3e31384d4b72ab66102e88/avereshchagin

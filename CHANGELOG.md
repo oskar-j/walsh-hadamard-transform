@@ -9,6 +9,55 @@ The `## [x.y.z]` headings are load-bearing: the release workflow extracts the
 section matching the version in `pyproject.toml` and uses it as the GitHub
 Release notes.
 
+## [0.2.0]
+
+### Added
+
+- **PPM support.** Both Netpbm pixmap variants are read -- `P6` binary and `P3`
+  ASCII -- and `P6` is written. Header comments are skipped, and a `maxval`
+  below 255 is rescaled to the full range. 16-bit samples are rejected with a
+  clear message rather than misread.
+- Format dispatch by filename suffix (`.bmp`, `.ppm`, `.pnm`) via
+  `walsh.image.reader_for`, so `walsh compress photo.ppm out.cim` and
+  `walsh extract out.cim photo.ppm` work with no extra flags. A picture can be
+  compressed from one format and extracted to another.
+- `walsh.image.base.RasterImage`, the abstract base that states the in-memory
+  contract every raster format honours.
+- Top-down BMP support: a negative header height is now understood instead of
+  being read as a huge unsigned number.
+- Method-level docstrings across `src/walsh`, with `Args:`, `Returns:` and
+  `Raises:` sections wherever they apply.
+
+### Changed
+
+- **`walsh.image` is now a package** rather than a single module, one submodule
+  per format: `base`, `bmp`, `ppm`, `cim`, and the shared `_io` helpers. Every
+  name the old module exported is re-exported from `walsh.image`, so existing
+  imports keep working.
+- **Breaking: the in-memory pixel contract is now RGB, top row first**, for
+  every format. `BMPImage` previously handed out pixels in BMP's own
+  blue-green-red order and bottom-up row order, and `Task` treated them as if
+  they were RGB top-down. Both are now converted on read and write.
+
+  This was harmless while BMP was the only format, since the same swap applied
+  on the way out. With a second format it is not: without this change,
+  BMP -> `.cim` -> PPM would come back with red and blue exchanged and the
+  image upside down.
+
+  Consequences:
+  - `BMPImage.get_raw_data()` returns different tuples than in 0.1.x. Code
+    reading pixels directly needs no change if it treated them as RGB, which
+    is what it now genuinely gets.
+  - **Compressed output changed.** A `.cim` written by 0.1.x, extracted with
+    0.2.0, comes back with red and blue swapped and vertically flipped.
+    Re-compress from the source image rather than converting old `.cim` files.
+  - Reconstruction quality is unchanged in practice: on `data/image.bmp` the
+    PSNR moves from 23.10 dB to 23.09 dB. The fix is about correctness and
+    cross-format interoperability, not quality.
+
+  Verified against Pillow as an independent decoder: `BMPImage` now reads
+  `data/image.bmp` pixel-for-pixel identically to `PIL.Image.open`.
+
 ## [0.1.3]
 
 ### Added
@@ -121,6 +170,7 @@ alters every compressed output:
   any non-`None` coefficient above `-1/sqrt(2)**n` zeroes essentially the whole
   spectrum.
 
+[0.2.0]: https://github.com/oskar-j/walsh-hadamard-transform/releases/tag/v0.2.0
 [0.1.3]: https://github.com/oskar-j/walsh-hadamard-transform/releases/tag/v0.1.3
 [0.1.2]: https://github.com/oskar-j/walsh-hadamard-transform/releases/tag/v0.1.2
 [0.1.1]: https://github.com/oskar-j/walsh-hadamard-transform/releases/tag/v0.1.1
