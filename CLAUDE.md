@@ -32,6 +32,13 @@ python examples/roundtrip.py    # same thing plus matplotlib plots
 The local `.venv` is Python 3.12. `walsh` is installed as a console script
 (`walsh.cli:main`).
 
+`cli.py` uses **click**, not argparse. `main` is a `click.group` with `compress`
+and `extract` subcommands, so tests drive it through `click.testing.CliRunner`
+rather than calling `main(argv)` — it no longer returns an int. `_EXPECTED_ERRORS`
+is the tuple of exceptions turned into a clean `click.ClickException`; it has to
+list `struct.error` explicitly, since that derives from `Exception` rather than
+`ValueError`.
+
 ## Layout
 
 `src/` layout, package name `walsh`, built with setuptools. Tests import the

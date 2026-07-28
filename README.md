@@ -4,6 +4,8 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/walsh.svg)](https://pypi.org/project/walsh/)
 [![CI](https://github.com/oskar-j/walsh-hadamard-transform/actions/workflows/ci.yml/badge.svg)](https://github.com/oskar-j/walsh-hadamard-transform/actions/workflows/ci.yml)
 [![Coverage](https://img.shields.io/badge/coverage-%E2%89%A5%2090%25-brightgreen)](https://github.com/oskar-j/walsh-hadamard-transform/actions/workflows/ci.yml)
+[![Downloads](https://img.shields.io/pepy/dt/walsh)](https://pepy.tech/project/walsh)
+[![Stars](https://img.shields.io/github/stars/oskar-j/walsh-hadamard-transform)](https://github.com/oskar-j/walsh-hadamard-transform/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Compressing images with a Hadamard transform
@@ -80,7 +82,11 @@ walsh extract  data/transformed.cim data/recreated.bmp
 `compress` accepts `--packed-block-size` (how many low-frequency coefficients
 per axis to keep -- lower is smaller and lossier), `--y-block-size`,
 `--chroma-block-size` and `--coeff-removal`. Add `-v`/`-vv` for progress
-logging, and see `walsh --help` for the full list.
+logging, and see `walsh -h` for the full list.
+
+Exit codes follow the usual convention: `0` on success, `1` when the input
+cannot be processed (not a 24-bit BMP, truncated, unreadable), and `2` for a
+usage error such as a missing file or an unknown option.
 
 ### As a library
 
@@ -102,9 +108,10 @@ python examples/roundtrip.py
 
 ## Requirements
 
-The package itself needs only `numpy` -- BMP parsing is done by hand with
-`struct`. `matplotlib` and `Pillow` are needed only by the example script, and
-are declared as the `demo` extra. Versions are pinned in `pyproject.toml`;
+The package needs `numpy` and `click` -- BMP parsing is done by hand with
+`struct`, and `click` powers the command line interface. `matplotlib` and
+`Pillow` are needed only by the example script, and are declared as the `demo`
+extra. Versions are pinned in `pyproject.toml`;
 `requirements.txt`, `requirements-demo.txt` and `requirements-dev.txt` mirror
 them for plain `pip install -r` workflows.
 
