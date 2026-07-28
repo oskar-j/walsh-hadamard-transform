@@ -32,6 +32,12 @@ im.crop((left, top, left + side, top + side)).resize((400, 400), Image.LANCZOS).
 )
 ```
 
+## `recreated.ppm`
+
+`earth.ppm` after a compress/extract round trip at the default settings, so
+current 0.2.0 output: 4.00x on the compressed intermediate, reconstructed at
+25.07 dB PSNR.
+
 ## `image.bmp`, `recreated.bmp`
 
 The original 400x400 sample carried over from the Python 2 project, and an
