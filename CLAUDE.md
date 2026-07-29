@@ -68,8 +68,10 @@ strip reader, not loosening the checks. `cim.py` holds
 `CustomizableImage`, the `.cim` container: `<II` dimensions, three `<HHH`
 `BlockDescription` records (Y, Cb, Cr), then coefficients as little-endian
 `int16` — its channel dicts are keyed `"y"`, `"cb"`, `"cr"` and rely on dict
-insertion order matching the on-disk order. `_io.py` has `align` and
-`open_binary`. `__init__.py` re-exports everything the pre-0.2.0 single module
+insertion order matching the on-disk order. `_io.py` has `align`,
+`open_binary_read` and `open_binary_write` — separate rather than one
+mode-string function, so `open()` gets a literal mode and the handle type is
+known; `open_binary(source, mode)` remains as a delegate. `__init__.py` re-exports everything the pre-0.2.0 single module
 exported, so old imports still work, and owns `reader_for`, which dispatches on
 filename suffix.
 
@@ -91,10 +93,12 @@ the same call once `coeff` is set.
 
 **`colors.py`** — RGB ↔ YCbCr per-pixel conversion, clamped to 0-255.
 
-**`decorators.py`** — `cached`, an unbounded memo keyed on arguments, falling
-back to `repr()` for unhashable ones (which `functools.lru_cache` cannot do).
-**Never apply it to a method**: `self` joins the key by strong reference, so
-every instance leaks. Key a module-level function on the values it depends on.
+**`decorators.py`** — `cached` returns a `Memo`, an unbounded memo keyed on
+arguments, falling back to `repr()` for unhashable ones (which
+`functools.lru_cache` cannot do). It is a class rather than a closure so
+`cache_clear`/`cache_size` are typed members rather than bolted-on attributes.
+**Never apply it to a method**: `self` would join the key by strong reference.
+`Memo` is not a descriptor, so that misuse now raises `TypeError` at the call.
 
 **`exceptions.py`** — `WalshError` (base), `UnsupportedFileFormatError`, and
 `EXPECTED_ERRORS`, the tuple the CLI converts into a clean `ClickException`.
@@ -150,6 +154,13 @@ section in the same merge. The `## [x.y.z]` headings are load-bearing.
 `MANIFEST.in` controls the sdist. It exists mainly because setuptools ships
 `tests/test_*.py` but not `tests/conftest.py`, which would produce a sdist whose
 tests all error on missing fixtures.
+
+## Typing
+
+`mypy --strict` over the `walsh` package, and **the codebase carries no
+`type: ignore`**. If one seems necessary, the annotation or the design is
+usually wrong: both historical suppressions came from a function attribute that
+wanted to be a class member, and an `open()` call that wanted a literal mode.
 
 ## Docstring style
 

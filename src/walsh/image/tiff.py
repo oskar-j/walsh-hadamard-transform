@@ -19,7 +19,7 @@ import struct
 from typing import BinaryIO
 
 from walsh.exceptions import UnsupportedFileFormatError
-from walsh.image._io import FileSource, open_binary
+from walsh.image._io import FileSource, open_binary_read, open_binary_write
 from walsh.image.base import RasterImage
 
 __all__ = ["TIFF_BIG_ENDIAN", "TIFF_LITTLE_ENDIAN", "TIFF_MAGIC", "TIFFImage"]
@@ -325,7 +325,7 @@ class TIFFImage(RasterImage):
                 this profile does not cover.
             OSError: If the file cannot be read.
         """
-        with open_binary(filename, "rb") as file:
+        with open_binary_read(filename) as file:
             ifd_offset = self._read_header(file)
             entries = self._read_ifd(file, ifd_offset)
 
@@ -380,7 +380,7 @@ class TIFFImage(RasterImage):
         out += struct.pack("<3H", *(BITS_PER_SAMPLE,) * SAMPLES_PER_PIXEL)
         out += body
 
-        with open_binary(filename, "wb") as file:
+        with open_binary_write(filename) as file:
             file.write(bytes(out))
 
 

@@ -66,6 +66,9 @@ pytest will work — `uv sync` handles that. `tests/conftest.py` provides
   sections that do not apply rather than leaving them empty.
 * **Type annotations throughout.** `mypy` runs in strict mode and the package
   ships a `py.typed` marker, so annotations are part of the public contract.
+* **No `type: ignore`.** There are none in the codebase and pull requests
+  should not add one. Every suppression removed so far turned out to be a
+  design smell rather than a type checker limitation.
 * Ruff handles formatting; do not hand-format around it.
 
 ## Things that will trip you up

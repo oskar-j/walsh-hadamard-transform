@@ -15,7 +15,7 @@ import numpy as np
 import numpy.typing as npt
 
 from walsh.exceptions import UnsupportedFileFormatError
-from walsh.image._io import FileSource, open_binary
+from walsh.image._io import FileSource, open_binary_read, open_binary_write
 
 __all__ = ["COEFF_DTYPE", "BlockDescription", "CustomizableImage"]
 
@@ -153,7 +153,7 @@ class CustomizableImage:
             OSError: If the file cannot be read.
         """
         image = cls()
-        with open_binary(filename, "rb") as file:
+        with open_binary_read(filename) as file:
             image._read_header(file)
             for channel, description in image._descriptions.items():
                 if description is not None and description.number_of_blocks > 0:
@@ -289,7 +289,7 @@ class CustomizableImage:
             ValueError: If any channel has no description set.
             OSError: If the file cannot be written.
         """
-        with open_binary(filename, "wb") as file:
+        with open_binary_write(filename) as file:
             self._write_header(file)
             for blocks in self._data.values():
                 self._write_blocks(file, blocks)

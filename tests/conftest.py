@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import struct
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -167,9 +168,9 @@ def build_tiff(
     return bytes(out)
 
 
-def write_tiff(path: Path, width: int, height: int, pixels: list[Pixel], **kwargs: object) -> Path:
+def write_tiff(path: Path, width: int, height: int, pixels: list[Pixel], **kwargs: Any) -> Path:
     """Write an uncompressed TIFF from RGB pixels given top row first."""
-    path.write_bytes(build_tiff(width, height, pixels, **kwargs))  # type: ignore[arg-type]
+    path.write_bytes(build_tiff(width, height, pixels, **kwargs))
     return path
 
 

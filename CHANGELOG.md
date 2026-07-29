@@ -9,6 +9,39 @@ The `## [x.y.z]` headings are load-bearing: the release workflow extracts the
 section matching the version in `pyproject.toml` and uses it as the GitHub
 Release notes.
 
+## [0.3.2]
+
+### Changed
+
+- **No `type: ignore` remains anywhere in the codebase.** All three were fixed
+  at the root rather than moved or broadened.
+
+  - `decorators.py` suppressed `attr-defined` twice, because `cache_clear` and
+    `cache_size` were attributes bolted onto a closure. The memo is now a
+    `Memo` class, so both are real typed methods. `cached` returns
+    `Memo[P, R]`, which keeps the wrapped signature: mypy now rejects a wrong
+    argument type, a wrong use of `cache_size()`'s result, *and* a call to an
+    attribute that does not exist -- the last being exactly what the
+    suppression was hiding.
+  - `image/_io.py` suppressed `misc`, because `open()` given a `str` mode
+    returns `IO[Any]`. Split into `open_binary_read` and `open_binary_write`,
+    each opening with a literal mode, so the handle's type is known. This also
+    removes the `"r" in mode` string sniffing that decided between stdin and
+    stdout. `open_binary(source, mode)` is kept as a thin delegate, so no
+    caller breaks.
+
+- `Memo` is not a descriptor, so applying `@cached` to a method now raises
+  `TypeError` at the call rather than silently pinning every instance -- the
+  0.2.1 leak becomes structurally hard to reintroduce.
+
+### Added
+
+- `tests/test_decorators.py`, covering memoisation, the unhashable-argument
+  fallback, keyword handling and ordering, metadata preservation, the
+  not-a-descriptor guarantee, and both stream helpers including their stdin and
+  stdout paths. `decorators.py` and `image/_io.py` are now at 100%; total
+  coverage rises from 96.9% to 97.7%.
+
 ## [0.3.1]
 
 ### Added
@@ -296,6 +329,7 @@ alters every compressed output:
   any non-`None` coefficient above `-1/sqrt(2)**n` zeroes essentially the whole
   spectrum.
 
+[0.3.2]: https://github.com/oskar-j/walsh-hadamard-transform/releases/tag/v0.3.2
 [0.3.1]: https://github.com/oskar-j/walsh-hadamard-transform/releases/tag/v0.3.1
 [0.3.0]: https://github.com/oskar-j/walsh-hadamard-transform/releases/tag/v0.3.0
 [0.2.2]: https://github.com/oskar-j/walsh-hadamard-transform/releases/tag/v0.2.2
