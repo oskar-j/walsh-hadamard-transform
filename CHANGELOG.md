@@ -9,6 +9,20 @@ The `## [x.y.z]` headings are load-bearing: the release workflow extracts the
 section matching the version in `pyproject.toml` and uses it as the GitHub
 Release notes.
 
+## [0.2.2]
+
+### Added
+
+- `CONTRIBUTING.md`, covering the uv-first setup, the checks CI runs, the
+  coverage floor and how it is enforced, the docstring and typing conventions,
+  how to add an image format, and the release process.
+
+  It also writes down the three invariants that are easy to break by accident:
+  raster images are RGB top-row-first in memory whatever the file stores,
+  `@cached` must never be applied to a method, and coefficient removal
+  thresholds spectral coefficients rather than matrix entries. Each of those
+  was a real bug at some point in 0.1.x-0.2.1.
+
 ## [0.2.1]
 
 ### Fixed
@@ -222,6 +236,7 @@ alters every compressed output:
   any non-`None` coefficient above `-1/sqrt(2)**n` zeroes essentially the whole
   spectrum.
 
+[0.2.2]: https://github.com/oskar-j/walsh-hadamard-transform/releases/tag/v0.2.2
 [0.2.1]: https://github.com/oskar-j/walsh-hadamard-transform/releases/tag/v0.2.1
 [0.2.0]: https://github.com/oskar-j/walsh-hadamard-transform/releases/tag/v0.2.0
 [0.1.3]: https://github.com/oskar-j/walsh-hadamard-transform/releases/tag/v0.1.3

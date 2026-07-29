@@ -32,6 +32,11 @@ and data compression algorithms, such as `JPEG XR` and `MPEG-4 AVC`. In video co
 applications, it is usually used in the form of the sum of absolute transformed differences. 
 It is also a crucial part of *Grover's algorithm* and *Shor's algorithm* in quantum computing. 
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development setup, the checks CI
+runs, and the conventions this codebase follows.
+
 ## Acknowledgement
 
 This code is partially based on the solution from [ktisha/python2012](https://github.com/ktisha/python2012/tree/dee4beda8e22f3a66a3e31384d4b72ab66102e88/avereshchagin)
