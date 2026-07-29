@@ -13,7 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from walsh.exceptions import UnsupportedFileFormatError
-from walsh.image._io import FileSource, align, open_binary
+from walsh.image._io import FileSource, align, open_binary, open_binary_read, open_binary_write
 from walsh.image.base import Pixel, RasterImage
 from walsh.image.bmp import (
     BMP_HEADER_FORMAT,
@@ -50,6 +50,8 @@ __all__ = [
     "UnsupportedFileFormatError",
     "align",
     "open_binary",
+    "open_binary_read",
+    "open_binary_write",
     "reader_for",
 ]
 

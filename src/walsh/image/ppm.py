@@ -21,7 +21,7 @@ import logging
 from typing import BinaryIO
 
 from walsh.exceptions import UnsupportedFileFormatError
-from walsh.image._io import FileSource, open_binary
+from walsh.image._io import FileSource, open_binary_read, open_binary_write
 from walsh.image.base import RasterImage
 
 __all__ = ["PPM_ASCII_MAGIC", "PPM_BINARY_MAGIC", "PPM_MAX_SAMPLE", "PPMImage"]
@@ -222,7 +222,7 @@ class PPMImage(RasterImage):
             UnsupportedFileFormatError: If the data is not a supported PPM.
             OSError: If the file cannot be read.
         """
-        with open_binary(filename, "rb") as file:
+        with open_binary_read(filename) as file:
             maxval = self._read_header(file)
             if self._magic == PPM_BINARY_MAGIC:
                 self._read_binary_data(file, maxval)
@@ -249,6 +249,6 @@ class PPMImage(RasterImage):
             PPM_MAX_SAMPLE,
         )
         body = bytes(channel for pixel in self._raw_data for channel in pixel)
-        with open_binary(filename, "wb") as file:
+        with open_binary_write(filename) as file:
             file.write(header)
             file.write(body)

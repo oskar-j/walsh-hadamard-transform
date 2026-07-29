@@ -15,7 +15,7 @@ import struct
 from typing import BinaryIO
 
 from walsh.exceptions import UnsupportedFileFormatError
-from walsh.image._io import FileSource, align, open_binary
+from walsh.image._io import FileSource, align, open_binary_read, open_binary_write
 from walsh.image.base import Pixel, RasterImage
 
 __all__ = [
@@ -149,7 +149,7 @@ class BMPImage(RasterImage):
             UnsupportedFileFormatError: If the data is not a supported BMP.
             OSError: If the file cannot be read.
         """
-        with open_binary(filename, "rb") as file:
+        with open_binary_read(filename) as file:
             self._read_header(file)
             self._read_data(file)
         log.debug("loaded BMP %dx%d from %s", self._width, self._height, filename)
@@ -210,7 +210,7 @@ class BMPImage(RasterImage):
         Raises:
             OSError: If the file cannot be written.
         """
-        with open_binary(filename, "wb") as file:
+        with open_binary_write(filename) as file:
             self._write_header(file)
             self._write_data(file)
 

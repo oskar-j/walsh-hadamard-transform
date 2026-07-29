@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import functools
 from collections.abc import Callable, Hashable
-from typing import Any, ParamSpec, TypeVar
+from typing import Any, Generic, ParamSpec, TypeVar
 
-__all__ = ["cached"]
+__all__ = ["Memo", "cached"]
 
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -53,31 +53,25 @@ def _make_key(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Hashable:
     return key
 
 
-def cached(function: Callable[P, R]) -> Callable[P, R]:
-    """Memoise ``function`` on its arguments, tolerating unhashable ones.
+class Memo(Generic[P, R]):
+    """A callable wrapping one function together with its memo.
 
-    Unlike :func:`functools.lru_cache` this accepts unhashable arguments by
-    falling back to their ``repr``, which is what the numpy-heavy call sites
-    here need. The cache is unbounded and lives for the life of the process.
-
-    .. warning::
-       Do not apply this to a method. ``self`` becomes part of the key and is
-       held by a strong reference, so every instance ever used is kept alive
-       and the cache grows without bound. Make the function module level and
-       key it on the values it actually depends on, as
-       :func:`~walsh.transforms.hadamard_matrix` does.
-
-    Args:
-        function: The callable to memoise.
-
-    Returns:
-        A wrapper around ``function`` with the same signature, carrying
-        ``cache_clear()`` and ``cache_size()`` attributes.
+    A class rather than a closure with attributes bolted on: ``cache_clear``
+    and ``cache_size`` are then real, typed members, so callers get them
+    checked instead of the type checker being told to look away.
     """
-    cache: dict[Hashable, R] = {}
 
-    @functools.wraps(function)
-    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+    def __init__(self, function: Callable[P, R]) -> None:
+        """Wrap ``function``, starting with an empty cache.
+
+        Args:
+            function: The callable to memoise.
+        """
+        self._function = function
+        self._cache: dict[Hashable, R] = {}
+        functools.update_wrapper(self, function)
+
+    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> R:
         """Return the memoised result, computing it on the first call.
 
         Args:
@@ -90,11 +84,45 @@ def cached(function: Callable[P, R]) -> Callable[P, R]:
         """
         key = _make_key(args, kwargs)
         try:
-            return cache[key]
+            return self._cache[key]
         except KeyError:
-            result = cache[key] = function(*args, **kwargs)
+            result = self._cache[key] = self._function(*args, **kwargs)
             return result
 
-    wrapper.cache_clear = cache.clear  # type: ignore[attr-defined]
-    wrapper.cache_size = lambda: len(cache)  # type: ignore[attr-defined]
-    return wrapper
+    def cache_clear(self) -> None:
+        """Discard every memoised result."""
+        self._cache.clear()
+
+    def cache_size(self) -> int:
+        """Report how many results are currently memoised.
+
+        Returns:
+            The number of distinct argument combinations held.
+        """
+        return len(self._cache)
+
+
+def cached(function: Callable[P, R]) -> Memo[P, R]:
+    """Memoise ``function`` on its arguments, tolerating unhashable ones.
+
+    Unlike :func:`functools.lru_cache` this accepts unhashable arguments by
+    falling back to their ``repr``, which is what the numpy-heavy call sites
+    here need. The cache is unbounded and lives for the life of the process.
+
+    .. warning::
+       Do not apply this to a method. ``self`` becomes part of the key and is
+       held by a strong reference, so every instance ever used is kept alive
+       and the cache grows without bound. Make the function module level and
+       key it on the values it actually depends on, as
+       :func:`~walsh.transforms.hadamard_matrix` does. :class:`Memo` is not a
+       descriptor, so misusing it this way fails loudly rather than leaking
+       quietly.
+
+    Args:
+        function: The callable to memoise.
+
+    Returns:
+        A :class:`Memo` with the same call signature as ``function``, plus
+        :meth:`Memo.cache_clear` and :meth:`Memo.cache_size`.
+    """
+    return Memo(function)
