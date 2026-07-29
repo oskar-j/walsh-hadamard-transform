@@ -111,6 +111,46 @@ or not they are zero, but it makes the result far more compressible. On
 | 25 | 14,769 | 27,924 B | 24.71 dB |
 | 50 | 8,917 | 19,285 B | 23.85 dB |
 
+### Reading the PSNR figures
+
+**PSNR** is *peak signal-to-noise ratio*, the standard way to put a number on
+how much a lossy codec changed an image. It compares the reconstruction against
+the original pixel by pixel:
+
+```
+PSNR = 10 * log10(255**2 / MSE)
+```
+
+where `MSE` is the mean squared difference across every channel of every pixel,
+and 255 is the largest value an 8-bit channel can hold. It is measured in
+decibels, and **higher is better**: a perfect reconstruction has infinite PSNR,
+and every 3 dB gained means the mean squared error was halved.
+
+Because the scale is logarithmic, small-looking differences matter. Going from
+23 dB to 25 dB is not an 8% improvement, it is roughly a 37% reduction in error
+power. Equally, the near-identical 25.07 and 25.06 in the table above mean the
+first step of coefficient removal cost essentially nothing.
+
+Rough expectations for 8-bit images, though they vary by content:
+
+| PSNR | Typically means |
+| --- | --- |
+| above 40 dB | differences invisible without pixel-peeping |
+| 30-40 dB | good lossy compression, artefacts hard to spot |
+| 25-30 dB | visible softening and blocking |
+| below 25 dB | obvious degradation |
+
+The figures here sit around 25 dB because the defaults are aggressive: each
+8x8 luma block keeps 16 of its 64 coefficients and each 16x16 chroma block
+keeps 16 of 256. Raise `--packed-block-size` for a gentler setting.
+
+One caveat worth knowing: PSNR measures arithmetic difference, not perceived
+quality. It is reproducible and easy to compare, which is why it is quoted here,
+but two images with the same PSNR can look noticeably different — it under-
+weights structured artefacts like block edges, which the eye picks out readily.
+Treat it as a consistent yardstick for comparing settings of *this* codec rather
+than an absolute measure of how good an image looks.
+
 Exit codes follow the usual convention: `0` on success, `1` when the input
 cannot be processed (not a 24-bit BMP, truncated, unreadable), and `2` for a
 usage error such as a missing file or an unknown option.

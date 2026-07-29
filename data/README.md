@@ -1,13 +1,23 @@
 # Sample images
 
-Test inputs for the codec. They are excluded from the sdist and wheel (see
-`MANIFEST.in`), because at roughly half a megabyte each they would dominate the
-distribution, and the tests that use them skip when they are absent.
+Test inputs for the codec, and the codec's own output for each. They are
+excluded from the sdist and wheel (see `MANIFEST.in`), because at roughly half a
+megabyte each they would dominate the distribution, and the tests that use them
+skip when they are absent.
 
-## `earth.ppm`
+Every `recreated.*` file is current output, regenerated whenever the codec
+changes. Reproduce any of them with:
 
-A 400x400 binary (P6) portable pixmap, added in 0.2.0 as the worked example for
-PPM support.
+```
+walsh compress data/<source> /tmp/out.cim
+walsh extract  /tmp/out.cim data/<recreated>
+```
+
+## The Blue Marble sample
+
+`earth.ppm` and `earth.tiff` are the same 400x400 picture in two containers, so
+they also serve as a check that the source format does not affect the result:
+compressing either produces a byte-identical `.cim`.
 
 - **Source:** [The Earth seen from Apollo 17](https://commons.wikimedia.org/wiki/File:The_Earth_seen_from_Apollo_17.jpg)
   on Wikimedia Commons — the "Blue Marble" photograph taken on 7 December 1972.
@@ -16,10 +26,12 @@ PPM support.
   copyright protection in the United States, so no attribution is required —
   the credit above is recorded as good practice, not obligation.
 - **Modifications:** the 3000x3002 JPEG original was centre-cropped to square,
-  resampled to 400x400 with Lanczos filtering, and written as P6. Wikimedia
-  Commons does not host Netpbm files, so a conversion step is unavoidable.
+  resampled to 400x400 with Lanczos filtering, and written as binary P6.
+  Wikimedia Commons does not host Netpbm or TIFF files, so a conversion step is
+  unavoidable. `earth.tiff` was then written from `earth.ppm` by this package,
+  as an uncompressed little-endian single-strip TIFF.
 
-Reproduce it with:
+Reproduce the PPM with:
 
 ```python
 from PIL import Image
@@ -32,15 +44,19 @@ im.crop((left, top, left + side, top + side)).resize((400, 400), Image.LANCZOS).
 )
 ```
 
-## `recreated.ppm`
+## Files
 
-`earth.ppm` after a compress/extract round trip at the default settings, so
-current 0.2.0 output: 4.00x on the compressed intermediate, reconstructed at
-25.07 dB PSNR.
+| File | Role | Result |
+| --- | --- | --- |
+| `image.bmp` | The original 400x400 sample carried over from the Python 2 project | — |
+| `recreated.bmp` | `image.bmp` round-tripped at default settings | 23.09 dB |
+| `earth.ppm` | Blue Marble, binary P6 pixmap | — |
+| `recreated.ppm` | `earth.ppm` round-tripped | 25.07 dB |
+| `earth.tiff` | Blue Marble, uncompressed TIFF | — |
+| `recreated.tiff` | `earth.tiff` round-tripped | 25.07 dB |
 
-## `image.bmp`, `recreated.bmp`
+The two Blue Marble reconstructions are pixel-identical, as they must be: the
+codec sees the same picture whichever container it arrives in.
 
-The original 400x400 sample carried over from the Python 2 project, and an
-example of its reconstruction. `recreated.bmp` predates 0.2.0, so it was
-produced before the pixel-order fix; regenerate it with
-`python examples/roundtrip.py` rather than treating it as current output.
+See the [main README](../README.md#reading-the-psnr-figures) for what the dB
+figures mean.
