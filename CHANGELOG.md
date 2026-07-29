@@ -9,6 +9,38 @@ The `## [x.y.z]` headings are load-bearing: the release workflow extracts the
 section matching the version in `pyproject.toml` and uses it as the GitHub
 Release notes.
 
+## [0.3.0]
+
+### Added
+
+- **Uncompressed TIFF support**, read and written, under `.tif` and `.tiff`.
+
+  TIFF is a container rather than a single layout, so the reader handles one
+  profile and names what it will not take rather than guessing: uncompressed
+  (`Compression = 1`), RGB (`PhotometricInterpretation = 2`), 8 bits per
+  sample, 3 samples per pixel, chunky, top-left orientation. LZW, PackBits,
+  palette, CMYK, greyscale, 16-bit, planar and rotated files are each rejected
+  with a message naming the actual value.
+
+  Both byte orders are read, since a TIFF header declares its own endianness.
+  Multi-strip files are read. Output is always little-endian and single-strip,
+  in the minimal 140-byte-header layout -- byte-for-byte the same size as
+  Pillow produces for the same picture.
+
+  Verified against Pillow in both directions: this reads TIFFs Pillow writes
+  (single and multi-strip) pixel-for-pixel, and Pillow reads what this writes.
+
+- A `gradient_tiff` fixture and `write_tiff`/`build_tiff` test helpers. The
+  builder can emit the unsupported profiles on demand, which Pillow will not
+  do, so the rejection paths are covered by real files rather than mocks.
+
+### Notes
+
+TIFF joins BMP and PPM under the same in-memory contract, so the source format
+cannot change the result: compressing one picture from `.bmp`, `.ppm` and
+`.tif` produces byte-identical `.cim` output, and a `.cim` can be extracted to
+any of the three. Both are asserted in the test suite.
+
 ## [0.2.2]
 
 ### Added
@@ -236,6 +268,7 @@ alters every compressed output:
   any non-`None` coefficient above `-1/sqrt(2)**n` zeroes essentially the whole
   spectrum.
 
+[0.3.0]: https://github.com/oskar-j/walsh-hadamard-transform/releases/tag/v0.3.0
 [0.2.2]: https://github.com/oskar-j/walsh-hadamard-transform/releases/tag/v0.2.2
 [0.2.1]: https://github.com/oskar-j/walsh-hadamard-transform/releases/tag/v0.2.1
 [0.2.0]: https://github.com/oskar-j/walsh-hadamard-transform/releases/tag/v0.2.0

@@ -110,7 +110,8 @@ version are a no-op.
 * Check the "Issues" section for something to pick up
 * Support for more uncompressed formats — PAM and headerless RAW are the
   obvious next ones, and the `image` package is laid out to make them
-  self-contained additions
+  self-contained additions. Widening the TIFF profile (PackBits, planar,
+  16-bit) is another self-contained piece
 * Entropy or run-length coding in the `.cim` container. `--coeff-removal`
   currently makes the spectrum much sparser without shrinking the file, since
   the format writes a fixed count of `int16` regardless of zeros; gzip recovers

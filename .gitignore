@@ -112,3 +112,6 @@ data/transformed.cim
 .coverage.*
 coverage.xml
 htmlcov/
+
+# macOS
+.DS_Store

@@ -57,7 +57,14 @@ defaulting to the original values (Y 8, chroma 16, packed 4).
 **`image/`** — a package, one submodule per format. `base.py` defines
 `RasterImage` and **the contract that matters: RGB pixels, top row first,
 whatever the file stores**. `bmp.py` converts both ways (BMP is blue-green-red
-and bottom-up); `ppm.py` needs no conversion. `cim.py` holds
+and bottom-up); `ppm.py` and `tiff.py` need no conversion.
+
+`tiff.py` supports exactly one TIFF profile — uncompressed, RGB, 8-bit, chunky,
+top-left — and rejects everything else by name rather than guessing. It reads
+both byte orders (the header declares its own) and multi-strip files; it always
+writes little-endian single-strip. Widening the profile means handling
+`Compression`, `PlanarConfiguration` or `BitsPerSample` in `_validate` and the
+strip reader, not loosening the checks. `cim.py` holds
 `CustomizableImage`, the `.cim` container: `<II` dimensions, three `<HHH`
 `BlockDescription` records (Y, Cb, Cr), then coefficients as little-endian
 `int16` — its channel dicts are keyed `"y"`, `"cb"`, `"cr"` and rely on dict
@@ -67,7 +74,9 @@ exported, so old imports still work, and owns `reader_for`, which dispatches on
 filename suffix.
 
 Adding a format means a new submodule subclassing `RasterImage` plus an entry in
-`SUFFIXES`. Honour the RGB top-down contract there, not in `Task`.
+`SUFFIXES`. Honour the RGB top-down contract there, not in `Task`. The contract
+is what makes the source format irrelevant to the output: `tests/test_task.py`
+asserts that BMP, PPM and TIFF of one picture compress to byte-identical `.cim`.
 
 **`transforms.py`** — `hadamard_matrix(size)` is a **module-level** `@cached`
 function building the orthonormal matrix and sorting rows by sign-change count

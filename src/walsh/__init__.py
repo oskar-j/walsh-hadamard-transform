@@ -20,6 +20,7 @@ from walsh.image import (
     CustomizableImage,
     PPMImage,
     RasterImage,
+    TIFFImage,
     reader_for,
 )
 from walsh.task import Action, Task
@@ -39,6 +40,7 @@ __all__ = [
     "PPMImage",
     "RasterImage",
     "RgbColorModel",
+    "TIFFImage",
     "Task",
     "Transform",
     "UnsupportedFileFormatError",

@@ -24,6 +24,7 @@ from walsh.image.bmp import (
 )
 from walsh.image.cim import COEFF_DTYPE, BlockDescription, CustomizableImage
 from walsh.image.ppm import PPM_ASCII_MAGIC, PPM_BINARY_MAGIC, PPM_MAX_SAMPLE, PPMImage
+from walsh.image.tiff import TIFF_BIG_ENDIAN, TIFF_LITTLE_ENDIAN, TIFF_MAGIC, TIFFImage
 
 __all__ = [
     "BMP_HEADER_FORMAT",
@@ -35,6 +36,9 @@ __all__ = [
     "PPM_BINARY_MAGIC",
     "PPM_MAX_SAMPLE",
     "SUFFIXES",
+    "TIFF_BIG_ENDIAN",
+    "TIFF_LITTLE_ENDIAN",
+    "TIFF_MAGIC",
     "BMPImage",
     "BlockDescription",
     "CustomizableImage",
@@ -42,6 +46,7 @@ __all__ = [
     "PPMImage",
     "Pixel",
     "RasterImage",
+    "TIFFImage",
     "UnsupportedFileFormatError",
     "align",
     "open_binary",
@@ -54,6 +59,8 @@ SUFFIXES: dict[str, type[RasterImage]] = {
     ".bmp": BMPImage,
     ".ppm": PPMImage,
     ".pnm": PPMImage,
+    ".tif": TIFFImage,
+    ".tiff": TIFFImage,
 }
 
 #: Used when the format cannot be inferred, which keeps piping through stdin
