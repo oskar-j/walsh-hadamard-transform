@@ -202,6 +202,12 @@ def gradient_tiff(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
+def sample_tiff() -> Path:
+    """The 400x400 sample pixmap checked in as an uncompressed TIFF."""
+    return _sample("earth.tiff")
+
+
+@pytest.fixture
 def sample_bmp() -> Path:
     """The 400x400 sample bitmap checked into the repository."""
     return _sample("image.bmp")

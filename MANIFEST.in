@@ -13,4 +13,6 @@ recursive-include examples *.py
 # files are absent. Keep them out of the distribution.
 exclude data/*.bmp
 exclude data/*.ppm
+exclude data/*.tif
+exclude data/*.tiff
 exclude data/*.cim

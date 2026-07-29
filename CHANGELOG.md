@@ -9,6 +9,34 @@ The `## [x.y.z]` headings are load-bearing: the release workflow extracts the
 section matching the version in `pyproject.toml` and uses it as the GitHub
 Release notes.
 
+## [0.3.1]
+
+### Added
+
+- `data/earth.tiff` and `data/recreated.tiff`: the Blue Marble sample as an
+  uncompressed TIFF, and the codec's output for it. `earth.tiff` is the same
+  picture as `earth.ppm` in a different container, so the pair doubles as a
+  check that the source format does not affect the result -- compressing either
+  produces a byte-identical `.cim`, and the two reconstructions are
+  pixel-identical.
+- A `sample_tiff` fixture and tests that exercise the checked-in samples.
+- An explanation of PSNR in the README, covering the formula, why the
+  logarithmic scale makes small-looking differences significant, what ranges
+  mean in practice, and the caveat that it measures arithmetic difference
+  rather than perceived quality.
+
+### Changed
+
+- `data/recreated.bmp` regenerated with the current codec. It had been produced
+  before the 0.2.0 pixel-order fix, so `data/README.md` carried a note telling
+  readers not to treat it as current output. Regenerating it retires the note:
+  70% of channels changed, by at most 11 and 1.13 on average. PSNR against the
+  source is unchanged at 23.09 dB, which is consistent with the 0.2.0 finding
+  that the channel and row fix corrected the pipeline without measurably
+  changing reconstruction quality.
+- `data/README.md` rewritten around a table of every sample and its result,
+  with the provenance and licence of the Blue Marble source kept in full.
+
 ## [0.3.0]
 
 ### Added
@@ -268,6 +296,7 @@ alters every compressed output:
   any non-`None` coefficient above `-1/sqrt(2)**n` zeroes essentially the whole
   spectrum.
 
+[0.3.1]: https://github.com/oskar-j/walsh-hadamard-transform/releases/tag/v0.3.1
 [0.3.0]: https://github.com/oskar-j/walsh-hadamard-transform/releases/tag/v0.3.0
 [0.2.2]: https://github.com/oskar-j/walsh-hadamard-transform/releases/tag/v0.2.2
 [0.2.1]: https://github.com/oskar-j/walsh-hadamard-transform/releases/tag/v0.2.1

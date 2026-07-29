@@ -223,3 +223,27 @@ def test_extract_to_any_format_gives_the_same_picture(
     Task().with_action("extract").with_input(str(compressed)).with_output(str(target)).run()
 
     np.testing.assert_array_equal(_pixels(reference), _pixels(target))
+
+
+def test_checked_in_samples_agree_across_containers(
+    sample_ppm: Path, sample_tiff: Path, tmp_path: Path
+) -> None:
+    """data/earth.ppm and data/earth.tiff are one picture in two containers."""
+    digests = []
+    for source in (sample_ppm, sample_tiff):
+        output = tmp_path / f"{source.suffix.lstrip('.')}.cim"
+        Task().with_action("compress").with_input(str(source)).with_output(str(output)).run()
+        digests.append(output.read_bytes())
+
+    np.testing.assert_array_equal(_pixels(sample_ppm), _pixels(sample_tiff))
+    assert digests[0] == digests[1]
+
+
+def test_sample_tiff_survives_the_round_trip(sample_tiff: Path, tmp_path: Path) -> None:
+    compressed = tmp_path / "earth.cim"
+    restored = tmp_path / "earth.tiff"
+    Task().with_action("compress").with_input(str(sample_tiff)).with_output(str(compressed)).run()
+    assert compressed.stat().st_size < sample_tiff.stat().st_size
+
+    Task().with_action("extract").with_input(str(compressed)).with_output(str(restored)).run()
+    assert np.abs(_pixels(sample_tiff) - _pixels(restored)).mean() < 20
