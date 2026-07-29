@@ -69,15 +69,23 @@ filename suffix.
 Adding a format means a new submodule subclassing `RasterImage` plus an entry in
 `SUFFIXES`. Honour the RGB top-down contract there, not in `Task`.
 
-**`transforms.py`** — `WalshHadamardTransform` builds an orthonormal Hadamard
-matrix and sorts its rows by sign-change count for sequency (Walsh) ordering.
-`h @ src @ h`; the matrix is symmetric so `inverse_transform` just calls
-`transform`. Memoised via `@cached`.
+**`transforms.py`** — `hadamard_matrix(size)` is a **module-level** `@cached`
+function building the orthonormal matrix and sorting rows by sign-change count
+for sequency (Walsh) ordering. It must stay module level: memoising the old
+method pinned every `WalshHadamardTransform` instance forever (fixed in 0.2.1).
+`WalshHadamardTransform._build_matrix` is now a thin delegate kept for callers.
+
+`transform` is `h @ src @ h` then, if `coeff` is set, zeroing coefficients below
+that magnitude. `inverse_transform` applies only the matrix — repeating the
+threshold would discard reconstructed detail twice, so the two are no longer
+the same call once `coeff` is set.
 
 **`colors.py`** — RGB ↔ YCbCr per-pixel conversion, clamped to 0-255.
 
 **`decorators.py`** — `cached`, an unbounded memo keyed on arguments, falling
 back to `repr()` for unhashable ones (which `functools.lru_cache` cannot do).
+**Never apply it to a method**: `self` joins the key by strong reference, so
+every instance leaks. Key a module-level function on the values it depends on.
 
 **`exceptions.py`** — `WalshError` (base), `UnsupportedFileFormatError`, and
 `EXPECTED_ERRORS`, the tuple the CLI converts into a clean `ClickException`.
@@ -94,15 +102,13 @@ The transform is lossless and involutive. The loss is in
 `packed_block_size` square — at the default 4 that is 16 of 64 luma
 coefficients and 16 of 256 chroma coefficients. `Task._slice` zero-pads the
 image up to a block multiple; `Task._merge` crops the padding back off.
-`with_coeff_removal` is a second, independent lossy knob applied during matrix
-construction, off by default.
+`with_coeff_removal` is a second, independent lossy knob, off by default. It
+thresholds *spectral coefficients*, not matrix entries — every entry of an
+orthonormal Hadamard matrix has the same magnitude, so a threshold on the
+matrix can only ever be all-or-nothing. That was the 0.2.1 bug.
 
 ## Known quirks — do not "fix" casually
 
-- **The `coeff` comparison in `WalshHadamardTransform._build_matrix` is
-  one-sided** (`value - coeff < tol`, not on the magnitude). Preserved verbatim
-  from the Python 2 original; in practice any non-`None` coeff above
-  `-1/sqrt(2)**n` zeroes every entry that is ever negated.
 - **Coefficients are rounded (`np.rint`) on write.** The Python 2 original
   relied on `struct.pack` implicitly truncating floats. Output therefore differs
   from the pre-port `data/recreated.bmp` by at most 2 per channel (mean 0.33).

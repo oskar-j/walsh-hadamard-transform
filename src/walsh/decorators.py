@@ -60,6 +60,13 @@ def cached(function: Callable[P, R]) -> Callable[P, R]:
     falling back to their ``repr``, which is what the numpy-heavy call sites
     here need. The cache is unbounded and lives for the life of the process.
 
+    .. warning::
+       Do not apply this to a method. ``self`` becomes part of the key and is
+       held by a strong reference, so every instance ever used is kept alive
+       and the cache grows without bound. Make the function module level and
+       key it on the values it actually depends on, as
+       :func:`~walsh.transforms.hadamard_matrix` does.
+
     Args:
         function: The callable to memoise.
 
