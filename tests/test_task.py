@@ -178,3 +178,48 @@ def test_sample_ppm_compresses_and_survives_the_round_trip(
     # A photograph, so less forgiving than the synthetic gradient, but the
     # low-frequency corner still carries the picture.
     assert np.abs(before - after).mean() < 20
+
+
+def test_tiff_roundtrips_through_the_codec(gradient_tiff: Path, tmp_path: Path) -> None:
+    compressed = tmp_path / "t.cim"
+    restored = tmp_path / "back.tif"
+    Task().with_action("compress").with_input(str(gradient_tiff)).with_output(str(compressed)).run()
+    Task().with_action("extract").with_input(str(compressed)).with_output(str(restored)).run()
+
+    before, after = _pixels(gradient_tiff), _pixels(restored)
+    assert before.shape == after.shape
+    assert np.abs(before - after).mean() < 24
+
+
+def test_every_source_format_compresses_identically(tmp_path: Path) -> None:
+    """BMP, PPM and TIFF of one picture must produce the same .cim."""
+    from conftest import gradient_pixels, write_bmp, write_ppm, write_tiff
+
+    pixels = gradient_pixels(16, 16)
+    sources = {
+        "bmp": write_bmp(tmp_path / "s.bmp", 16, 16, pixels),
+        "ppm": write_ppm(tmp_path / "s.ppm", 16, 16, pixels),
+        "tif": write_tiff(tmp_path / "s.tif", 16, 16, pixels),
+    }
+    digests = {}
+    for name, path in sources.items():
+        output = tmp_path / f"{name}.cim"
+        Task().with_action("compress").with_input(str(path)).with_output(str(output)).run()
+        digests[name] = output.read_bytes()
+
+    assert digests["bmp"] == digests["ppm"] == digests["tif"]
+
+
+@pytest.mark.parametrize("suffix", [".bmp", ".ppm", ".tif"])
+def test_extract_to_any_format_gives_the_same_picture(
+    gradient_bmp: Path, tmp_path: Path, suffix: str
+) -> None:
+    compressed = tmp_path / "x.cim"
+    Task().with_action("compress").with_input(str(gradient_bmp)).with_output(str(compressed)).run()
+
+    reference = tmp_path / "ref.bmp"
+    target = tmp_path / f"out{suffix}"
+    Task().with_action("extract").with_input(str(compressed)).with_output(str(reference)).run()
+    Task().with_action("extract").with_input(str(compressed)).with_output(str(target)).run()
+
+    np.testing.assert_array_equal(_pixels(reference), _pixels(target))
