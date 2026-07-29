@@ -266,8 +266,8 @@ class Task:
         come back as a different format from the one it went in as.
 
         Raises:
-            UnsupportedFileFormatError: If the output suffix is unknown.
-            struct.error: If the ``.cim`` file is truncated or malformed.
+            UnsupportedFileFormatError: If the output suffix is unknown, or
+                the ``.cim`` file is truncated or malformed.
             OSError: If either file cannot be opened.
         """
         log.info("extracting %s -> %s", self._input, self._output)

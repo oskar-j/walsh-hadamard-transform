@@ -9,6 +9,54 @@ The `## [x.y.z]` headings are load-bearing: the release workflow extracts the
 section matching the version in `pyproject.toml` and uses it as the GitHub
 Release notes.
 
+## [0.2.1]
+
+### Fixed
+
+- **`--coeff-removal` is now a usable quality dial.** It applied its threshold
+  to the *Hadamard matrix*, where every entry has the same magnitude
+  (`1/sqrt(2)**n`), so any threshold was necessarily all-or-nothing: below
+  `-1/sqrt(2)**n` it did nothing, at or above it zeroed every negated entry.
+  On `data/earth.ppm`, `--coeff-removal 0.5` took PSNR from 25.07 dB to
+  7.35 dB, and no setting did anything useful in between.
+
+  The threshold now applies to the **spectral coefficients**, which is what
+  "coefficient removal" means, and degrades smoothly:
+
+  | `--coeff-removal` | non-zero coefficients | gzipped `.cim` | PSNR |
+  | --- | --- | --- | --- |
+  | *(unset)* | 48,121 / 60,000 | 59,404 B | 25.07 dB |
+  | 5 | 29,049 | 45,080 B | 25.06 dB |
+  | 25 | 14,769 | 27,924 B | 24.71 dB |
+  | 50 | 8,917 | 19,285 B | 23.85 dB |
+
+  The `.cim` file itself does not shrink, because the format stores a fixed
+  count of `int16` values whether or not they are zero. The sparsity is real
+  though: gzipped, a threshold of 25 is 2.1x smaller for 0.36 dB.
+
+  A negative threshold is now rejected rather than silently keeping
+  everything, and `inverse_transform` no longer reapplies the threshold, which
+  would have discarded reconstructed detail a second time. **Output with no
+  `--coeff-removal` is byte-for-byte unchanged from 0.2.0.**
+
+- **A malformed `.cim` raised `struct.error`.** That derives from `Exception`
+  rather than `WalshError`, so a library caller catching this package's own
+  exceptions missed it. `BMPImage` gained truncation checks in 0.2.0 and the
+  `.cim` reader did not. It now raises `UnsupportedFileFormatError` for a
+  truncated header, a truncated block description, missing block data, and a
+  description whose packed size exceeds its block size. The CLI already
+  reported these cleanly, so only library callers see a difference.
+
+- **The matrix memo pinned every transform instance for the life of the
+  process.** `cached` was applied to a method, so `self` was part of the key
+  and held by a strong reference: instances were never collected and the cache
+  grew without bound, roughly 4.6 KB of retained matrices per compress run.
+  Matrix construction moved to the module-level `walsh.transforms.hadamard_matrix`,
+  memoised on `size` alone, so the cache now holds one entry per distinct block
+  size no matter how many transforms are created. `WalshHadamardTransform._build_matrix`
+  remains as a thin delegate. `cached` now documents that it must not be
+  applied to methods.
+
 ## [0.2.0]
 
 ### Added
@@ -174,6 +222,7 @@ alters every compressed output:
   any non-`None` coefficient above `-1/sqrt(2)**n` zeroes essentially the whole
   spectrum.
 
+[0.2.1]: https://github.com/oskar-j/walsh-hadamard-transform/releases/tag/v0.2.1
 [0.2.0]: https://github.com/oskar-j/walsh-hadamard-transform/releases/tag/v0.2.0
 [0.1.3]: https://github.com/oskar-j/walsh-hadamard-transform/releases/tag/v0.1.3
 [0.1.2]: https://github.com/oskar-j/walsh-hadamard-transform/releases/tag/v0.1.2

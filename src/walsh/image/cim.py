@@ -14,6 +14,7 @@ from typing import BinaryIO, NamedTuple
 import numpy as np
 import numpy.typing as npt
 
+from walsh.exceptions import UnsupportedFileFormatError
 from walsh.image._io import FileSource, open_binary
 
 __all__ = ["COEFF_DTYPE", "BlockDescription", "CustomizableImage"]
@@ -55,6 +56,32 @@ class CustomizableImage:
         self._descriptions: dict[str, BlockDescription | None] = dict.fromkeys(CHANNELS)
         self._data: dict[str, list[Block]] = {channel: [] for channel in CHANNELS}
 
+    @staticmethod
+    def _read_exactly(file: BinaryIO, size: int, what: str) -> bytes:
+        """Read exactly ``size`` bytes, or report the file as malformed.
+
+        ``struct.unpack`` would otherwise raise ``struct.error``, which is not
+        a :class:`~walsh.exceptions.WalshError` and so escapes callers that
+        catch this package's own exceptions.
+
+        Args:
+            file: Stream to read from.
+            size: Number of bytes required.
+            what: What is being read, used only in the error message.
+
+        Returns:
+            Exactly ``size`` bytes.
+
+        Raises:
+            UnsupportedFileFormatError: If the stream ends first.
+        """
+        data = file.read(size)
+        if len(data) < size:
+            raise UnsupportedFileFormatError(
+                f"truncated .cim {what}: expected {size} bytes, got {len(data)}"
+            )
+        return data
+
     def _read_header(self, file: BinaryIO) -> None:
         """Read the dimensions and the three block descriptions.
 
@@ -62,14 +89,19 @@ class CustomizableImage:
             file: Stream positioned at the start of the file.
 
         Raises:
-            struct.error: If the stream is too short to hold the header.
+            UnsupportedFileFormatError: If the stream is too short to hold the
+                header.
         """
         size = struct.calcsize(self.HEADER_FORMAT)
-        self._width, self._height = struct.unpack(self.HEADER_FORMAT, file.read(size))
+        self._width, self._height = struct.unpack(
+            self.HEADER_FORMAT, self._read_exactly(file, size, "header")
+        )
         size = struct.calcsize(self.DESCRIPTION_FORMAT)
         for channel in self._descriptions:
-            fields = struct.unpack(self.DESCRIPTION_FORMAT, file.read(size))
-            self._descriptions[channel] = BlockDescription(*fields)
+            raw = self._read_exactly(file, size, f"{channel} block description")
+            self._descriptions[channel] = BlockDescription(
+                *struct.unpack(self.DESCRIPTION_FORMAT, raw)
+            )
 
     @staticmethod
     def _read_blocks(file: BinaryIO, description: BlockDescription) -> list[Block]:
@@ -84,15 +116,22 @@ class CustomizableImage:
             the stored coefficients in the top-left corner and zeros elsewhere.
 
         Raises:
-            struct.error: If the stream ends mid-block.
+            UnsupportedFileFormatError: If the stream ends mid-block, or the
+                description declares a packed size larger than the block.
         """
         original, packed, count = description
+        if packed > original:
+            raise UnsupportedFileFormatError(
+                f"invalid .cim block description: packed size {packed} exceeds "
+                f"block size {original}"
+            )
         pattern = "<" + "h" * (packed * packed)
         size = struct.calcsize(pattern)
 
         blocks = []
-        for _ in range(count):
-            data = struct.unpack(pattern, file.read(size))
+        for index in range(count):
+            raw = CustomizableImage._read_exactly(file, size, f"block {index}")
+            data = struct.unpack(pattern, raw)
             block = np.zeros((original, original), dtype=np.float64)
             block[:packed, :packed] = np.asarray(data, dtype=np.float64).reshape(packed, packed)
             blocks.append(block)
@@ -109,7 +148,8 @@ class CustomizableImage:
             The populated container.
 
         Raises:
-            struct.error: If the file is truncated or not a ``.cim`` at all.
+            UnsupportedFileFormatError: If the file is truncated or not a
+                ``.cim`` at all.
             OSError: If the file cannot be read.
         """
         image = cls()

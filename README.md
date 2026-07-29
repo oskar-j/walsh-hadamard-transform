@@ -92,6 +92,19 @@ per axis to keep -- lower is smaller and lossier), `--y-block-size`,
 `--chroma-block-size` and `--coeff-removal`. Add `-v`/`-vv` for progress
 logging, and see `walsh -h` for the full list.
 
+`--coeff-removal` is the second, independent lossy knob: spectral coefficients
+smaller than the given magnitude are zeroed. It does not change the `.cim`
+file's size, because the format stores a fixed count of `int16` values whether
+or not they are zero, but it makes the result far more compressible. On
+`data/earth.ppm`:
+
+| `--coeff-removal` | non-zero coefficients | gzipped `.cim` | PSNR |
+| --- | --- | --- | --- |
+| *(unset)* | 48,121 / 60,000 | 59,404 B | 25.07 dB |
+| 5 | 29,049 | 45,080 B | 25.06 dB |
+| 25 | 14,769 | 27,924 B | 24.71 dB |
+| 50 | 8,917 | 19,285 B | 23.85 dB |
+
 Exit codes follow the usual convention: `0` on success, `1` when the input
 cannot be processed (not a 24-bit BMP, truncated, unreadable), and `2` for a
 usage error such as a missing file or an unknown option.

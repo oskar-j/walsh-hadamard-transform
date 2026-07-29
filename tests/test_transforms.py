@@ -54,10 +54,81 @@ def test_matrix_is_memoised(transform: WalshHadamardTransform) -> None:
     assert transform._build_matrix(8) is transform._build_matrix(8)
 
 
-def test_instances_with_different_coeff_do_not_share_cache() -> None:
+def test_matrix_does_not_depend_on_coeff() -> None:
+    """Coefficient removal acts on the spectrum, never on the matrix.
+
+    Every entry of an orthonormal Hadamard matrix has the same magnitude, so
+    any threshold applied to the matrix could only ever be all-or-nothing.
+    """
     plain = WalshHadamardTransform()._build_matrix(4)
-    stripped = WalshHadamardTransform(coeff=0.0)._build_matrix(4)
-    assert not np.array_equal(plain, stripped)
+    stripped = WalshHadamardTransform(coeff=100.0)._build_matrix(4)
+    assert np.array_equal(plain, stripped)
+    assert plain is stripped  # and they share the one memo entry
+
+
+def test_coeff_removal_is_graded(transform: WalshHadamardTransform) -> None:
+    """The whole point of the fix: more threshold, monotonically fewer terms."""
+    rng = np.random.default_rng(seed=7)
+    block = rng.uniform(0, 255, size=(8, 8))
+
+    kept = [
+        int((WalshHadamardTransform(coeff=c).transform(block) != 0).sum())
+        for c in (0.0, 1.0, 5.0, 20.0, 100.0, 1e9)
+    ]
+    assert kept == sorted(kept, reverse=True), kept
+    assert kept[0] == 64, "a zero threshold must keep everything"
+    assert kept[-1] == 0, "a huge threshold must drop everything"
+    assert len(set(kept)) > 2, f"expected a gradient, not a cliff: {kept}"
+
+
+def test_coeff_removal_drops_exactly_the_small_coefficients() -> None:
+    rng = np.random.default_rng(seed=11)
+    block = rng.uniform(0, 255, size=(8, 8))
+    full = WalshHadamardTransform().transform(block)
+
+    threshold = float(np.median(np.abs(full)))
+    thinned = WalshHadamardTransform(coeff=threshold).transform(block)
+
+    below = np.abs(full) < threshold
+    assert np.all(thinned[below] == 0)
+    np.testing.assert_allclose(thinned[~below], full[~below])
+
+
+def test_inverse_does_not_reapply_the_threshold() -> None:
+    """Removal is the lossy step; doing it twice would discard detail again."""
+    rng = np.random.default_rng(seed=13)
+    spectrum = rng.uniform(-50, 50, size=(8, 8))
+
+    lossy = WalshHadamardTransform(coeff=1e9)
+    plain = WalshHadamardTransform()
+    np.testing.assert_allclose(lossy.inverse_transform(spectrum), plain.inverse_transform(spectrum))
+
+
+def test_negative_coeff_is_rejected() -> None:
+    """It is compared against a magnitude, so a negative value keeps everything."""
+    with pytest.raises(ValueError, match="non-negative"):
+        WalshHadamardTransform(coeff=-1.0)
+
+
+def test_matrix_memo_does_not_pin_transform_instances() -> None:
+    """The memo is keyed on size alone, so instances stay collectable."""
+    import gc
+    import weakref
+
+    from walsh.transforms import hadamard_matrix
+
+    hadamard_matrix.cache_clear()
+    transform = WalshHadamardTransform()
+    reference = weakref.ref(transform)
+    transform.transform(np.zeros((8, 8)))
+
+    del transform
+    gc.collect()
+    assert reference() is None, "the memo is holding the instance alive"
+
+    for _ in range(20):
+        WalshHadamardTransform().transform(np.zeros((8, 8)))
+    assert hadamard_matrix.cache_size() == 1, "cache grows with instance count"
 
 
 def test_non_square_input_is_rejected(transform: WalshHadamardTransform) -> None:

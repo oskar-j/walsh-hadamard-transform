@@ -173,3 +173,45 @@ def test_bmp_rejects_truncated_pixel_data(tmp_path: Path) -> None:
     truncated.write_bytes(source.read_bytes()[:60])
     with pytest.raises(UnsupportedFileFormatError, match="truncated BMP pixel data"):
         BMPImage().load(str(truncated))
+
+
+@pytest.mark.parametrize(
+    ("name", "data", "match"),
+    [
+        ("three bytes", b"\x01\x02\x03", "truncated .cim header"),
+        ("header only", b"\x00" * 8, "truncated .cim y block description"),
+        (
+            "declares blocks it does not have",
+            struct.pack("<II", 16, 16) + struct.pack("<HHH", 8, 4, 5) * 3,
+            "truncated .cim block 0",
+        ),
+        (
+            "block cut in half",
+            struct.pack("<II", 8, 8) + struct.pack("<HHH", 8, 4, 1) * 3 + b"\x00" * 16,
+            "truncated .cim block 0",
+        ),
+        (
+            "packed size exceeds block size",
+            struct.pack("<II", 8, 8) + struct.pack("<HHH", 4, 8, 1) * 3 + b"\x00" * 128,
+            "packed size 8 exceeds block size 4",
+        ),
+    ],
+)
+def test_malformed_cim_raises_a_walsh_error(
+    tmp_path: Path, name: str, data: bytes, match: str
+) -> None:
+    """struct.error is not a WalshError, so it must not escape the reader."""
+    path = tmp_path / "bad.cim"
+    path.write_bytes(data)
+    with pytest.raises(UnsupportedFileFormatError, match=match):
+        CustomizableImage.load(str(path))
+
+
+def test_cim_declaring_no_blocks_is_valid(tmp_path: Path) -> None:
+    """Zero blocks per channel is legitimate; extract fills them with neutrals."""
+    path = tmp_path / "empty.cim"
+    path.write_bytes(struct.pack("<II", 8, 8) + struct.pack("<HHH", 8, 4, 0) * 3)
+
+    image = CustomizableImage.load(str(path))
+    assert image.get_dimensions() == (8, 8)
+    assert image.get_y_data() == []
