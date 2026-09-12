@@ -115,6 +115,10 @@ version are a no-op.
   obvious next ones, and the `image` package is laid out to make them
   self-contained additions. Widening the TIFF profile (PackBits, planar,
   16-bit) is another self-contained piece
+* A numpy-backed `RasterImage`. Since 0.4.0 the codec core is vectorised and
+  what remains of the run time is the format readers and writers building and
+  consuming the list of pixel tuples, plus the conversion across that boundary.
+  `get_raw_data` is public, so this needs a compatibility story
 * Entropy or run-length coding in the `.cim` container. `--coeff-removal`
   currently makes the spectrum much sparser without shrinking the file, since
   the format writes a fixed count of `int16` regardless of zeros; gzip recovers

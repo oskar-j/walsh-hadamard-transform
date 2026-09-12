@@ -9,6 +9,72 @@ The `## [x.y.z]` headings are load-bearing: the release workflow extracts the
 section matching the version in `pyproject.toml` and uses it as the GitHub
 Release notes.
 
+## [0.4.0]
+
+### Changed
+
+- **The codec core is vectorised end to end.** Every per-element Python loop
+  between loading a raster image and saving one is now a whole-array numpy
+  operation. On the 400x400 sample, `compress` drops from about 246 ms to
+  86 ms and `extract` from about 185 ms to 53 ms; the codec itself, meaning
+  everything except the format reader and writer, runs roughly five times
+  faster (200 ms to 40 ms, and 166 ms to 34 ms). **Output is unchanged**: all
+  four checked-in sample outputs reproduce byte for byte, and new tests pin
+  the matrix, the batched transform and the colour conversion to their
+  previous scalar forms bit for bit.
+
+  - `hadamard_matrix` uses Sylvester's construction, `log2(size)` Kronecker
+    products with `[[1, 1], [1, -1]]`, instead of a triple loop over bits,
+    rows and columns. At the codec's own block sizes both take about 0.1 ms,
+    once per process, since the result is memoised; the loop was never where
+    the time went. But it was `size ** 2 * log2(size)` Python iterations and
+    now scales: 82 ms to 0.4 ms at size 256. The scale is applied by
+    multiplication so entries are bit-identical to the loop's. It also
+    rejects a `size` that is not a power of two with `ValueError`, which the
+    construction requires, instead of returning a wrong-shaped matrix.
+  - `WalshHadamardTransform.transform` and `inverse_transform` accept a 3-D
+    stack of blocks, and `transform_sequence` and `inverse_transform_sequence`
+    use that to send every block of a channel through one broadcast matrix
+    product. Mixed block shapes, which the codec never produces, fall back to
+    one call per block. The `Transform` base class is unchanged.
+  - `colors.py` gains `rgb_to_ycbcr` and `ycbcr_to_rgb`, which convert an
+    `(n, 3)` array in a handful of operations. The per-pixel `ColorModel`
+    classes remain and now delegate to them one pixel at a time, so the two
+    cannot disagree.
+  - `Task._slice` and `_merge` cut and reassemble blocks with a single
+    reshape each rather than a split or stack per row and per block, and the
+    pipelines keep planes as arrays rather than lists between stages.
+  - `.cim` block I/O reads and decodes a whole channel with one `read` and
+    one `np.frombuffer`, and writes it with one `tobytes`, instead of one
+    `struct.unpack` or `write` per block. A truncated file still names the
+    first incomplete block.
+
+- **Why not multiprocessing.** The question that prompted this release was
+  whether the matrix loop could be parallelised. It could, but spawning a
+  worker pool costs about 170 ms on macOS, three orders of magnitude more
+  than the 0.1 ms build it would parallelise, and the memo is per process so
+  every worker would rebuild it anyway. Threads would not help either: numpy
+  releases the GIL inside a matrix product, but the codec's products are 8x8
+  and 16x16, far too small to amortise a handoff. The cost was interpreter
+  overhead per element, and vectorising removes it with no new dependency, no
+  pickling, and no start-method differences between platforms.
+
+- What remains of the wall time is the raster contract itself: the format
+  readers build a Python list of pixel tuples and the writers consume one, and
+  crossing that boundary into numpy and back is now about half of the codec
+  core. A numpy-backed `RasterImage` is the next step and a larger one, since
+  `get_raw_data` is public.
+
+### Added
+
+- Tests pinning `hadamard_matrix` to the pre-0.4.0 loop byte for byte at
+  every size from 1 to 64, batched transforms to per-block results exactly,
+  and the array colour conversion to the scalar formula exactly; plus the
+  power-of-two check, mixed and empty block sequences, the slice and merge
+  round trip on a padded plane, the pixel list and array conversion, multi-block
+  `.cim` channels, truncation reporting on a later block, and extracting a
+  file whose channels hold no blocks. 170 to 203 tests.
+
 ## [0.3.2]
 
 ### Changed
