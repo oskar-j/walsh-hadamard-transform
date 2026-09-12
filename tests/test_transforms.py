@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pytest
 
-from walsh.transforms import WalshHadamardTransform, _sign_changes
+from walsh.transforms import WalshHadamardTransform, _sign_changes, hadamard_matrix
 
 
 @pytest.fixture
@@ -141,3 +143,115 @@ def test_transform_sequence_returns_a_list(transform: WalshHadamardTransform) ->
     result = transform.transform_sequence([np.zeros((4, 4))] * 3)
     assert isinstance(result, list)
     assert len(result) == 3
+
+
+def _reference_matrix(size: int) -> np.ndarray:
+    """The pre-0.4.0 construction, kept verbatim as the oracle.
+
+    Negates, one bit at a time, every entry whose row and column indices share
+    that bit, then sorts rows into sequency order.
+    """
+    n = int(math.log(size, 2))
+    matrix = np.full((size, size), 1 / (np.sqrt(2) ** n), dtype=np.float64)
+    for i in range(n):
+        for j in range(size):
+            for k in range(size):
+                if (j // 2**i) % 2 == 1 and (k // 2**i) % 2 == 1:
+                    matrix[j, k] = -matrix[j, k]
+    return matrix[np.argsort(_sign_changes(matrix), kind="stable")]
+
+
+@pytest.mark.parametrize("size", [1, 2, 4, 8, 16, 32, 64])
+def test_matrix_is_bit_identical_to_the_reference_loop(size: int) -> None:
+    """Sylvester's construction must reproduce the old loop exactly, not closely.
+
+    The codec's output is defined by these entries and the checked-in sample
+    files were produced with the loop, so byte equality is the bar.
+    """
+    assert hadamard_matrix(size).tobytes() == _reference_matrix(size).tobytes()
+
+
+@pytest.mark.parametrize("size", [0, -8, 3, 6, 12, 100])
+def test_size_must_be_a_power_of_two(size: int) -> None:
+    with pytest.raises(ValueError, match="power of two"):
+        hadamard_matrix(size)
+
+
+def test_a_stack_transforms_exactly_like_its_blocks(transform: WalshHadamardTransform) -> None:
+    """One 3-D call must give what one 2-D call per block gives, bit for bit."""
+    rng = np.random.default_rng(seed=17)
+    stack = rng.uniform(0, 255, size=(5, 8, 8))
+
+    batched = transform.transform(stack)
+    assert batched.shape == stack.shape
+    for block, spectrum in zip(stack, batched, strict=True):
+        np.testing.assert_array_equal(spectrum, transform.transform(block))
+
+    restored = transform.inverse_transform(batched)
+    for block, back in zip(stack, restored, strict=True):
+        np.testing.assert_array_equal(back, transform.inverse_transform(transform.transform(block)))
+
+
+def test_stacked_non_square_blocks_are_rejected(transform: WalshHadamardTransform) -> None:
+    with pytest.raises(ValueError, match="square"):
+        transform.transform(np.zeros((3, 4, 8)))
+    with pytest.raises(ValueError, match="square"):
+        transform.transform(np.zeros((2, 3, 4, 4)))
+
+
+@pytest.mark.parametrize("coeff", [None, 10.0])
+def test_sequence_methods_match_per_block_calls(coeff: float | None) -> None:
+    """Batching is an optimisation, so it must be invisible in the result."""
+    rng = np.random.default_rng(seed=19)
+    blocks = list(rng.uniform(0, 255, size=(7, 8, 8)))
+    transform = WalshHadamardTransform(coeff=coeff)
+
+    spectra = transform.transform_sequence(blocks)
+    assert len(spectra) == len(blocks)
+    for block, spectrum in zip(blocks, spectra, strict=True):
+        np.testing.assert_array_equal(spectrum, transform.transform(block))
+
+    restored = transform.inverse_transform_sequence(spectra)
+    assert len(restored) == len(blocks)
+    for spectrum, block in zip(spectra, restored, strict=True):
+        np.testing.assert_array_equal(block, transform.inverse_transform(spectrum))
+
+
+def test_sequence_with_mixed_block_sizes_falls_back_to_one_call_each(
+    transform: WalshHadamardTransform,
+) -> None:
+    blocks = [np.full((4, 4), 1.0), np.full((8, 8), 2.0), np.full((4, 4), 3.0)]
+    spectra = transform.transform_sequence(blocks)
+    assert [spectrum.shape for spectrum in spectra] == [(4, 4), (8, 8), (4, 4)]
+    for block, spectrum in zip(blocks, spectra, strict=True):
+        np.testing.assert_array_equal(spectrum, transform.transform(block))
+
+
+def test_empty_sequence_gives_an_empty_list(transform: WalshHadamardTransform) -> None:
+    assert transform.transform_sequence([]) == []
+    assert transform.inverse_transform_sequence(iter(())) == []
+
+
+def test_sequence_accepts_any_iterable(transform: WalshHadamardTransform) -> None:
+    """A generator is consumed once and still comes back as a list."""
+    spectra = transform.transform_sequence(np.zeros((4, 4)) for _ in range(3))
+    assert isinstance(spectra, list)
+    assert len(spectra) == 3
+
+
+def test_base_class_sequence_methods_stay_one_call_per_block() -> None:
+    """The defaults on Transform serve subclasses that know nothing of stacks."""
+    from walsh.transforms import Block, Transform
+
+    class Negate(Transform):
+        def transform(self, src: Block) -> Block:
+            return -np.asarray(src)
+
+        def inverse_transform(self, src: Block) -> Block:
+            return -np.asarray(src)
+
+    blocks = [np.full((2, 2), 1.0), np.full((3, 3), 2.0)]  # mixed shapes are fine here
+    spectra = Negate().transform_sequence(blocks)
+    assert [s.tolist() for s in spectra] == [(-b).tolist() for b in blocks]
+    restored = Negate().inverse_transform_sequence(spectra)
+    assert [r.tolist() for r in restored] == [b.tolist() for b in blocks]

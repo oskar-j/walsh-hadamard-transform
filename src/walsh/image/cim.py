@@ -114,6 +114,8 @@ class CustomizableImage:
         Returns:
             One square array per block, of edge ``original_block_size``, with
             the stored coefficients in the top-left corner and zeros elsewhere.
+            The blocks are views into one array, read and decoded in a single
+            step rather than one ``struct.unpack`` per block.
 
         Raises:
             UnsupportedFileFormatError: If the stream ends mid-block, or the
@@ -125,17 +127,20 @@ class CustomizableImage:
                 f"invalid .cim block description: packed size {packed} exceeds "
                 f"block size {original}"
             )
-        pattern = "<" + "h" * (packed * packed)
-        size = struct.calcsize(pattern)
+        block_size = packed * packed * COEFF_DTYPE.itemsize
 
-        blocks = []
-        for index in range(count):
-            raw = CustomizableImage._read_exactly(file, size, f"block {index}")
-            data = struct.unpack(pattern, raw)
-            block = np.zeros((original, original), dtype=np.float64)
-            block[:packed, :packed] = np.asarray(data, dtype=np.float64).reshape(packed, packed)
-            blocks.append(block)
-        return blocks
+        raw = file.read(block_size * count)
+        if len(raw) < block_size * count:
+            index = len(raw) // block_size
+            raise UnsupportedFileFormatError(
+                f"truncated .cim block {index}: expected {block_size} bytes, "
+                f"got {len(raw) - index * block_size}"
+            )
+        coefficients = np.frombuffer(raw, dtype=COEFF_DTYPE).astype(np.float64)
+
+        blocks = np.zeros((count, original, original), dtype=np.float64)
+        blocks[:, :packed, :packed] = coefficients.reshape(count, packed, packed)
+        return list(blocks)
 
     @classmethod
     def load(cls, filename: FileSource) -> CustomizableImage:
@@ -265,19 +270,22 @@ class CustomizableImage:
 
     @staticmethod
     def _write_blocks(file: BinaryIO, blocks: Sequence[Block]) -> None:
-        """Write one channel's blocks as little-endian ``int16``.
+        """Write one channel's blocks as little-endian ``int16``, in one write.
 
         Coefficients are rounded to nearest and clipped into the ``int16``
         range. Clipping cannot trigger for 8-bit input, where the largest
-        possible coefficient is well inside the range.
+        possible coefficient is well inside the range. The blocks are stacked
+        and encoded together, so a channel is one array operation and one
+        ``write`` rather than one of each per block.
 
         Args:
             file: Stream to write to.
             blocks: The already-cropped blocks for one channel.
         """
-        for block in blocks:
-            data = np.clip(np.rint(block), COEFF_MIN, COEFF_MAX).astype(COEFF_DTYPE)
-            file.write(data.reshape(-1).tobytes())
+        if not blocks:
+            return
+        data = np.clip(np.rint(np.stack(blocks)), COEFF_MIN, COEFF_MAX).astype(COEFF_DTYPE)
+        file.write(data.tobytes())
 
     def save(self, filename: FileSource) -> None:
         """Write this image to ``filename``.

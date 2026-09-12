@@ -215,3 +215,55 @@ def test_cim_declaring_no_blocks_is_valid(tmp_path: Path) -> None:
     image = CustomizableImage.load(str(path))
     assert image.get_dimensions() == (8, 8)
     assert image.get_y_data() == []
+
+
+def test_truncation_names_the_first_incomplete_block(tmp_path: Path) -> None:
+    """Three 2x2 blocks declared, one and a half present: block 1 is the short one."""
+    description = struct.pack("<HHH", 2, 2, 3)
+    path = tmp_path / "short.cim"
+    path.write_bytes(struct.pack("<II", 4, 2) + description * 3 + b"\x00" * 12)
+
+    with pytest.raises(UnsupportedFileFormatError, match=r"block 1: expected 8 bytes, got 4"):
+        CustomizableImage.load(str(path))
+
+
+def test_cim_multi_block_channels_keep_order_and_values(tmp_path: Path) -> None:
+    description = BlockDescription(4, 2, 3)
+    image = CustomizableImage()
+    image.set_dimensions(12, 4)
+    image.set_descriptions(description, description, description)
+    channels = {
+        "y": [np.full((4, 4), value, dtype=float) for value in (1, -2, 3)],
+        "cb": [np.full((4, 4), value, dtype=float) for value in (10, 20, 30)],
+        "cr": [np.full((4, 4), value, dtype=float) for value in (-7, 0, 7)],
+    }
+    image.set_data(channels["y"], channels["cb"], channels["cr"])
+    path = tmp_path / "three.cim"
+    image.save(str(path))
+
+    restored = CustomizableImage.load(str(path))
+    for expected, got in (
+        (channels["y"], restored.get_y_data()),
+        (channels["cb"], restored.get_cb_data()),
+        (channels["cr"], restored.get_cr_data()),
+    ):
+        assert len(got) == 3
+        for before, after in zip(expected, got, strict=True):
+            np.testing.assert_array_equal(after[:2, :2], before[:2, :2])
+            assert not after[2:, :].any()
+            assert not after[:, 2:].any()
+
+
+def test_cim_saves_a_channel_with_no_blocks_as_nothing(tmp_path: Path) -> None:
+    """Zero blocks writes zero bytes for that channel, which is what load accepts."""
+    description = BlockDescription(8, 4, 0)
+    image = CustomizableImage()
+    image.set_dimensions(8, 8)
+    image.set_descriptions(description, description, description)
+    image.set_data([], [], [])
+
+    path = tmp_path / "empty.cim"
+    image.save(str(path))
+
+    assert path.stat().st_size == struct.calcsize("<II") + 3 * struct.calcsize("<HHH")
+    assert CustomizableImage.load(str(path)).get_y_data() == []

@@ -54,6 +54,14 @@ enum, dispatched through the `Task._ACTIONS` ClassVar; adding an action means
 adding a method *and* an entry there. Block sizes are constructor kwargs
 defaulting to the original values (Y 8, chroma 16, packed 4).
 
+Between `load` and `save` everything is numpy. `_pixels_to_array` and
+`_array_to_pixels` are the one crossing from the raster contract's list of
+tuples into an `(n, 3)` array and back (`np.fromiter` over a chained list and
+`zip` over `tolist()` columns, each about twice as fast as the obvious call).
+`_slice` and `_merge` are a single reshape each, and the block lists that flow
+between layers are views into one array. Do not reintroduce a per-pixel or
+per-block Python loop here: that was the whole cost of the codec before 0.4.0.
+
 **`image/`** — a package, one submodule per format. `base.py` defines
 `RasterImage` and **the contract that matters: RGB pixels, top row first,
 whatever the file stores**. `bmp.py` converts both ways (BMP is blue-green-red
@@ -68,7 +76,9 @@ strip reader, not loosening the checks. `cim.py` holds
 `CustomizableImage`, the `.cim` container: `<II` dimensions, three `<HHH`
 `BlockDescription` records (Y, Cb, Cr), then coefficients as little-endian
 `int16` — its channel dicts are keyed `"y"`, `"cb"`, `"cr"` and rely on dict
-insertion order matching the on-disk order. `_io.py` has `align`,
+insertion order matching the on-disk order. A channel is read with one `read`
+and one `np.frombuffer` and written with one `tobytes`; a truncated file still
+reports the index of the first incomplete block. `_io.py` has `align`,
 `open_binary_read` and `open_binary_write` — separate rather than one
 mode-string function, so `open()` gets a literal mode and the handle type is
 known; `open_binary(source, mode)` remains as a delegate. `__init__.py` re-exports everything the pre-0.2.0 single module
@@ -86,12 +96,29 @@ for sequency (Walsh) ordering. It must stay module level: memoising the old
 method pinned every `WalshHadamardTransform` instance forever (fixed in 0.2.1).
 `WalshHadamardTransform._build_matrix` is now a thin delegate kept for callers.
 
+`hadamard_matrix` is Sylvester's construction — `log2(size)` Kronecker
+products with `[[1, 1], [1, -1]]`, then the sequency sort — and it rejects a
+`size` that is not a power of two. The scale is applied by multiplication, not
+division, so every entry is bit-identical to the pre-0.4.0 triple loop;
+`tests/test_transforms.py` keeps that loop as an oracle and asserts byte
+equality. Do not "simplify" to `h / np.sqrt(size)`.
+
 `transform` is `h @ src @ h` then, if `coeff` is set, zeroing coefficients below
 that magnitude. `inverse_transform` applies only the matrix — repeating the
 threshold would discard reconstructed detail twice, so the two are no longer
-the same call once `coeff` is set.
+the same call once `coeff` is set. Both accept a 3-D stack of blocks as well as
+one block, and `transform_sequence` / `inverse_transform_sequence` stack
+uniformly shaped blocks into one broadcast call, falling back to one call per
+block only for mixed shapes. The `Transform` base class keeps the per-block
+defaults for subclasses that know nothing of stacks.
 
-**`colors.py`** — RGB ↔ YCbCr per-pixel conversion, clamped to 0-255.
+**`colors.py`** — RGB ↔ YCbCr conversion. `rgb_to_ycbcr` and `ycbcr_to_rgb`
+are the implementation and take whole `(n, 3)` arrays; the `ColorModel` classes
+are the per-pixel interface and delegate to them one pixel at a time, so the
+two cannot drift apart. The inverse truncates (`int()` semantics, via
+`np.trunc`) *then* clamps to 0-255. Keep the arithmetic in the same order as
+written: the same IEEE operations round the same way, which is what keeps the
+checked-in sample outputs byte-identical.
 
 **`decorators.py`** — `cached` returns a `Memo`, an unbounded memo keyed on
 arguments, falling back to `repr()` for unhashable ones (which
@@ -119,6 +146,22 @@ image up to a block multiple; `Task._merge` crops the padding back off.
 thresholds *spectral coefficients*, not matrix entries — every entry of an
 orthonormal Hadamard matrix has the same magnitude, so a threshold on the
 matrix can only ever be all-or-nothing. That was the 0.2.1 bug.
+
+### Performance
+
+No Python-level loop touches a pixel or a block between `load` and `save`
+(0.4.0). On the 400×400 sample the codec core takes about 40 ms; the rest of
+the wall time is the format readers and writers, which build and consume the
+raster contract's list of pixel tuples, plus the two conversions across that
+boundary. A numpy-backed `RasterImage` is the next step and a public-API
+change, since `get_raw_data` returns that list.
+
+Multiprocessing was considered for the matrix build and rejected: the build
+takes about 0.1 ms at the codec's block sizes and runs once per process
+(memoised), while spawning a pool costs ~170 ms, and the memo is per process
+so each worker would rebuild it. Threads do not help either: the matrix
+products are 8×8 and 16×16, far too small to amortise a handoff even though
+numpy releases the GIL inside them.
 
 ## Known quirks — do not "fix" casually
 
@@ -177,6 +220,7 @@ v0.1.2 added the coverage gate, v0.1.3 moved the CLI to click, and **v0.2.0
 added PPM, split `image.py` into a package, and fixed the BGR/bottom-up quirk**
 by making RGB top-down the shared in-memory contract. That last change makes
 0.1.x `.cim` files incompatible: extracting one with 0.2.0 swaps red and blue
-and flips the image.
+and flips the image. v0.4.0 vectorised the codec core with byte-identical
+output.
 Partially based on
 https://github.com/ktisha/python2012/tree/dee4beda8e22f3a66a3e31384d4b72ab66102e88/avereshchagin

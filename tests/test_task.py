@@ -7,7 +7,7 @@ import pytest
 
 from walsh.exceptions import UnsupportedFileFormatError
 from walsh.image import BMPImage, reader_for
-from walsh.task import Action, Task
+from walsh.task import Action, Task, _array_to_pixels, _pixels_to_array
 
 
 def _pixels(path: Path) -> np.ndarray:
@@ -247,3 +247,50 @@ def test_sample_tiff_survives_the_round_trip(sample_tiff: Path, tmp_path: Path) 
 
     Task().with_action("extract").with_input(str(compressed)).with_output(str(restored)).run()
     assert np.abs(_pixels(sample_tiff) - _pixels(restored)).mean() < 20
+
+
+def test_slice_cuts_blocks_row_major_and_merge_inverts_it() -> None:
+    """A 20x13 plane in 8-blocks: two rows of three blocks, padded on both axes."""
+    width, height, block = 20, 13, 8
+    plane = np.arange(width * height, dtype=float).reshape(height, width)
+
+    blocks = Task()._slice(plane.reshape(-1), width, height, block)
+    assert len(blocks) == 2 * 3
+    assert all(b.shape == (block, block) for b in blocks)
+    # Block 1 is the top row, second column: columns 8-15 of rows 0-7.
+    np.testing.assert_array_equal(blocks[1], plane[0:8, 8:16])
+    # Block 5 is the last one: rows 8-12 and columns 16-19 are picture, the
+    # rest is zero padding.
+    np.testing.assert_array_equal(blocks[5][:5, :4], plane[8:13, 16:20])
+    assert not blocks[5][5:, :].any()
+    assert not blocks[5][:, 4:].any()
+
+    np.testing.assert_array_equal(Task._merge(blocks, width, height), plane)
+
+
+def test_pixel_list_and_array_convert_both_ways() -> None:
+    from conftest import gradient_pixels
+
+    pixels = gradient_pixels(7, 5)
+    array = _pixels_to_array(pixels)
+    assert array.shape == (35, 3)
+    assert array.dtype == np.float64
+
+    back = _array_to_pixels(array.astype(np.uint8))
+    assert back == pixels
+    assert all(type(channel) is int for channel in back[0])
+
+
+def test_extract_fills_channels_without_blocks_with_neutral_values(tmp_path: Path) -> None:
+    """A .cim declaring no blocks decodes to zero luma and centred chroma: black."""
+    import struct
+
+    source = tmp_path / "empty.cim"
+    source.write_bytes(struct.pack("<II", 5, 3) + struct.pack("<HHH", 8, 4, 0) * 3)
+    restored = tmp_path / "empty.ppm"
+
+    Task().with_action("extract").with_input(str(source)).with_output(str(restored)).run()
+
+    pixels = _pixels(restored)
+    assert pixels.shape == (15, 3)
+    assert not pixels.any()

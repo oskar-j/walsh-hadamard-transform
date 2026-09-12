@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import logging
 from collections.abc import Callable, Sequence
 from enum import Enum
@@ -10,8 +11,8 @@ from typing import ClassVar
 import numpy as np
 import numpy.typing as npt
 
-from walsh.colors import RgbColorModel, YCbCrColorModel
-from walsh.image import BlockDescription, CustomizableImage, FileSource, reader_for
+from walsh.colors import rgb_to_ycbcr, ycbcr_to_rgb
+from walsh.image import BlockDescription, CustomizableImage, FileSource, Pixel, reader_for
 from walsh.transforms import WalshHadamardTransform
 
 __all__ = ["Action", "Task"]
@@ -154,7 +155,7 @@ class Task:
         return ((x - 1) // a + 1) * a - x
 
     def _slice(
-        self, values: Sequence[float], width: int, height: int, block_size: int
+        self, values: npt.ArrayLike, width: int, height: int, block_size: int
     ) -> list[Block]:
         """Reshape a flat channel into zero-padded square blocks.
 
@@ -166,7 +167,9 @@ class Task:
 
         Returns:
             The blocks in row-major order, each ``block_size`` square. The
-            image is zero-padded up to a whole number of blocks first.
+            image is zero-padded up to a whole number of blocks first. The
+            blocks are views into one contiguous array, cut by a single
+            reshape rather than a split per row and per block.
         """
         plane = np.asarray(values, dtype=np.float64).reshape(height, width)
 
@@ -182,12 +185,14 @@ class Task:
         )
         plane = np.pad(plane, ((0, height_padding), (0, width_padding)))
 
-        blocks: list[Block] = []
-        for row in np.vsplit(plane, plane.shape[0] // block_size):
-            blocks.extend(np.hsplit(row, row.shape[1] // block_size))
+        rows, columns = plane.shape[0] // block_size, plane.shape[1] // block_size
+        # Split each axis into (block index, offset within block), then bring
+        # the two block indices to the front so the blocks come out row-major.
+        grid = plane.reshape(rows, block_size, columns, block_size).swapaxes(1, 2)
+        blocks = grid.reshape(rows * columns, block_size, block_size)
 
-        log.debug("produced %d block(s) of %s", len(blocks), blocks[0].shape)
-        return blocks
+        log.debug("produced %d block(s) of %s", len(blocks), blocks.shape[1:])
+        return list(blocks)
 
     @staticmethod
     def _merge(blocks: Sequence[Block], width: int, height: int) -> Block:
@@ -203,14 +208,19 @@ class Task:
         Returns:
             The reassembled plane, of shape ``(height, width)``.
         """
-        _, block_width = blocks[0].shape
+        stacked = np.stack(blocks)
+        _, block_height, block_width = stacked.shape
         blocks_per_row = (width - 1) // block_width + 1
         blocks_per_column = len(blocks) // blocks_per_row
-        rows = [
-            np.hstack(blocks[i * blocks_per_row : (i + 1) * blocks_per_row])
-            for i in range(blocks_per_column)
-        ]
-        return np.vstack(rows)[0:height, 0:width]
+        # The inverse of the reshape in _slice: lay the blocks out on their
+        # grid, then interleave the block index with the offset within it.
+        grid = stacked[: blocks_per_column * blocks_per_row].reshape(
+            blocks_per_column, blocks_per_row, block_height, block_width
+        )
+        plane = grid.swapaxes(1, 2).reshape(
+            blocks_per_column * block_height, blocks_per_row * block_width
+        )
+        return plane[:height, :width]
 
     # -- pipelines -------------------------------------------------------
 
@@ -231,15 +241,12 @@ class Task:
         source_image.load(self._input)
 
         width, height = source_image.get_dimensions()
-        data = source_image.get_raw_data()
-
-        color = RgbColorModel()
-        y, cb, cr = zip(*(color.get_y_cb_cr(pixel) for pixel in data), strict=True)
+        ycbcr = rgb_to_ycbcr(_pixels_to_array(source_image.get_raw_data()))
 
         blocks = {
-            "y": self._slice(y, width, height, self._y_block_size),
-            "cb": self._slice(cb, width, height, self._cb_block_size),
-            "cr": self._slice(cr, width, height, self._cr_block_size),
+            "y": self._slice(ycbcr[:, 0], width, height, self._y_block_size),
+            "cb": self._slice(ycbcr[:, 1], width, height, self._cb_block_size),
+            "cr": self._slice(ycbcr[:, 2], width, height, self._cr_block_size),
         }
 
         transform = WalshHadamardTransform(self._coeff_removal)
@@ -282,20 +289,17 @@ class Task:
             "cr": (customizable_image.get_cr_data(), NEUTRAL_CHROMA),
         }
 
-        planes: dict[str, list[float]] = {}
+        planes: dict[str, npt.NDArray[np.float64]] = {}
         for channel, (spectral, neutral) in channels.items():
             if not spectral:
                 log.debug("channel %s is empty, filling with %d", channel, neutral)
-                planes[channel] = [float(neutral)] * (width * height)
+                planes[channel] = np.full(width * height, float(neutral))
                 continue
             merged = self._merge(transform.inverse_transform_sequence(spectral), width, height)
-            planes[channel] = np.asarray(merged).reshape(-1).tolist()
+            planes[channel] = merged.reshape(-1)
 
-        color = YCbCrColorModel()
-        pixels = [
-            color.get_rgb(triple)
-            for triple in zip(planes["y"], planes["cb"], planes["cr"], strict=True)
-        ]
+        ycbcr = np.stack([planes["y"], planes["cb"], planes["cr"]], axis=1)
+        pixels = _array_to_pixels(ycbcr_to_rgb(ycbcr))
 
         output_image = reader_for(self._output)
         output_image.set_dimensions(width, height)
@@ -326,3 +330,39 @@ class Task:
             self._coeff_removal,
         )
         Task._ACTIONS[self._action](self)
+
+
+def _pixels_to_array(pixels: Sequence[Pixel]) -> npt.NDArray[np.float64]:
+    """Turn a raster image's pixel list into an ``(n, 3)`` float array.
+
+    This is where the whole image crosses from Python objects into numpy.
+    ``np.asarray`` on a list of tuples inspects every element; feeding the
+    flattened samples to ``np.fromiter`` with a known count is about twice as
+    fast.
+
+    Args:
+        pixels: ``(r, g, b)`` triples, as :meth:`RasterImage.get_raw_data`
+            returns them.
+
+    Returns:
+        One row per pixel, in the same order.
+    """
+    samples = itertools.chain.from_iterable(pixels)
+    return np.fromiter(samples, dtype=np.float64, count=3 * len(pixels)).reshape(-1, 3)
+
+
+def _array_to_pixels(rgb: npt.NDArray[np.uint8]) -> list[Pixel]:
+    """Turn an ``(n, 3)`` array back into the raster contract's pixel list.
+
+    The mirror image of :func:`_pixels_to_array`. ``zip`` over the three
+    channel columns builds every tuple in C; mapping ``tuple`` over the rows
+    of ``tolist()`` is about twice as slow.
+
+    Args:
+        rgb: One ``(r, g, b)`` row per pixel.
+
+    Returns:
+        The pixels as integer triples, in the same order.
+    """
+    r, g, b = rgb.T.tolist()
+    return list(zip(r, g, b, strict=True))
