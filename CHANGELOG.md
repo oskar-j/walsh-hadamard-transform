@@ -9,6 +9,49 @@ The `## [x.y.z]` headings are load-bearing: the release workflow extracts the
 section matching the version in `pyproject.toml` and uses it as the GitHub
 Release notes.
 
+## [0.4.1]
+
+### Added
+
+- **PAM support**, read and written, under `.pam`. PAM (`P7`) is Netpbm's
+  general container: the same raw raster as PPM behind a header of
+  `KEY value` lines closed by `ENDHDR`, which also serves bitmaps, greyscale
+  and alpha. Exactly one profile is supported, `DEPTH 3` with `TUPLTYPE RGB`
+  (or no `TUPLTYPE`, which by convention means the same) and `MAXVAL` at most
+  255; greyscale, alpha, other tuple types and 16-bit samples are rejected by
+  name, as the TIFF reader does. A `maxval` below 255 is rescaled on load.
+  Header keys may come in any order, comment and blank lines are skipped, and
+  CRLF line endings are accepted.
+
+  The writer emits the header in the order Netpbm's own `pamtopam` uses, so
+  the two produce byte-identical files. Checked against Netpbm 11.2: the
+  reader loads `pamtopam`'s output and a `pamdepth 15` file correctly and
+  rejects a `ppmtopgm` greyscale file by name; the writer's output passes
+  `pamvalidate`, and `pamtopnm` turns it back into the source PPM exactly.
+- `data/earth.pam` and `data/recreated.pam`: the Blue Marble sample in a third
+  container, and the codec's output for it. Compressing it gives the same
+  `.cim` as the PPM and the TIFF, byte for byte, and the suite checks that.
+- `PAMImage` is exported from `walsh` and `walsh.image`, with `PAM_MAGIC`,
+  `PAM_DEPTH` and `PAM_TUPLTYPE`. `tests/test_pam.py` covers the round trip,
+  the header layout, field order, comments and whitespace, CRLF, optional and
+  multi-line `TUPLTYPE`, rescaling, every rejected profile by name, and eleven
+  malformed headers. 203 to 237 tests; `pam.py` and the shared decoder are at
+  100%.
+
+### Changed
+
+- PPM and PAM share one raster decoder and encoder in `image/_netpbm.py`,
+  since the two formats differ only in their headers. The decoder is
+  vectorised: one read, a lookup-table rescale when `maxval` is below 255,
+  and tuples built in C. Loading the 400x400 sample PPM drops from about
+  46 ms to 15 ms. The encoder consumes the pixel list through `bytes()`
+  directly, about twice as fast as the generator it replaces.
+- Netpbm samples larger than the declared `maxval`, which the formats forbid,
+  are now rejected with a named error in both the binary and ASCII PPM paths
+  rather than passed through as out-of-range values.
+- The CLI help lists every supported suffix. It had still said "BMP or PPM"
+  since before TIFF arrived.
+
 ## [0.4.0]
 
 ### Changed

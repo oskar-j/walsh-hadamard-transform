@@ -15,9 +15,9 @@ walsh extract  /tmp/out.cim data/<recreated>
 
 ## The Blue Marble sample
 
-`earth.ppm` and `earth.tiff` are the same 400x400 picture in two containers, so
-they also serve as a check that the source format does not affect the result:
-compressing either produces a byte-identical `.cim`.
+`earth.ppm`, `earth.tiff` and `earth.pam` are the same 400x400 picture in three
+containers, so they also serve as a check that the source format does not
+affect the result: compressing any of them produces a byte-identical `.cim`.
 
 - **Source:** [The Earth seen from Apollo 17](https://commons.wikimedia.org/wiki/File:The_Earth_seen_from_Apollo_17.jpg)
   on Wikimedia Commons — the "Blue Marble" photograph taken on 7 December 1972.
@@ -29,7 +29,9 @@ compressing either produces a byte-identical `.cim`.
   resampled to 400x400 with Lanczos filtering, and written as binary P6.
   Wikimedia Commons does not host Netpbm or TIFF files, so a conversion step is
   unavoidable. `earth.tiff` was then written from `earth.ppm` by this package,
-  as an uncompressed little-endian single-strip TIFF.
+  as an uncompressed little-endian single-strip TIFF, and so was `earth.pam`,
+  which is byte-identical to what Netpbm's `pamtopam` produces from
+  `earth.ppm`.
 
 Reproduce the PPM with:
 
@@ -54,9 +56,11 @@ im.crop((left, top, left + side, top + side)).resize((400, 400), Image.LANCZOS).
 | `recreated.ppm` | `earth.ppm` round-tripped | 25.07 dB |
 | `earth.tiff` | Blue Marble, uncompressed TIFF | — |
 | `recreated.tiff` | `earth.tiff` round-tripped | 25.07 dB |
+| `earth.pam` | Blue Marble, Netpbm PAM (`P7`, RGB) | — |
+| `recreated.pam` | `earth.pam` round-tripped | 25.07 dB |
 
-The two Blue Marble reconstructions are pixel-identical, as they must be: the
-codec sees the same picture whichever container it arrives in.
+The three Blue Marble reconstructions are pixel-identical, as they must be:
+the codec sees the same picture whichever container it arrives in.
 
 See the [main README](../README.md#reading-the-psnr-figures) for what the dB
 figures mean.

@@ -95,6 +95,15 @@ def test_malformed_ppm_is_rejected(tmp_path: Path, content: bytes, match: str) -
         PPMImage().load(str(path))
 
 
+@pytest.mark.parametrize("content", [b"P6\n1 1\n15\n\x01\x02\x16", b"P3\n1 1\n15\n1 2 22"])
+def test_samples_above_maxval_are_rejected(tmp_path: Path, content: bytes) -> None:
+    """The format forbids it, and passing 22/15 of full scale through would not end well."""
+    path = tmp_path / "over.ppm"
+    path.write_bytes(content)
+    with pytest.raises(UnsupportedFileFormatError, match="22 exceeds maxval 15"):
+        PPMImage().load(str(path))
+
+
 @pytest.mark.parametrize(
     ("name", "expected"),
     [

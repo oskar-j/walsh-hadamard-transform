@@ -23,6 +23,7 @@ from walsh.image.bmp import (
     BMPImage,
 )
 from walsh.image.cim import COEFF_DTYPE, BlockDescription, CustomizableImage
+from walsh.image.pam import PAM_DEPTH, PAM_MAGIC, PAM_TUPLTYPE, PAMImage
 from walsh.image.ppm import PPM_ASCII_MAGIC, PPM_BINARY_MAGIC, PPM_MAX_SAMPLE, PPMImage
 from walsh.image.tiff import TIFF_BIG_ENDIAN, TIFF_LITTLE_ENDIAN, TIFF_MAGIC, TIFFImage
 
@@ -32,6 +33,9 @@ __all__ = [
     "BMP_PIXEL_OFFSET",
     "BMP_SIGNATURE",
     "COEFF_DTYPE",
+    "PAM_DEPTH",
+    "PAM_MAGIC",
+    "PAM_TUPLTYPE",
     "PPM_ASCII_MAGIC",
     "PPM_BINARY_MAGIC",
     "PPM_MAX_SAMPLE",
@@ -43,6 +47,7 @@ __all__ = [
     "BlockDescription",
     "CustomizableImage",
     "FileSource",
+    "PAMImage",
     "PPMImage",
     "Pixel",
     "RasterImage",
@@ -55,10 +60,12 @@ __all__ = [
     "reader_for",
 ]
 
-#: Filename suffix to raster class. ``.pnm`` is the generic Netpbm suffix and
-#: is treated as PPM, which is the only Netpbm variant supported.
+#: Filename suffix to raster class. ``.pnm`` is the generic suffix for the
+#: older Netpbm formats and is treated as PPM, the only one of those
+#: supported; PAM has its own ``.pam``.
 SUFFIXES: dict[str, type[RasterImage]] = {
     ".bmp": BMPImage,
+    ".pam": PAMImage,
     ".ppm": PPMImage,
     ".pnm": PPMImage,
     ".tif": TIFFImage,

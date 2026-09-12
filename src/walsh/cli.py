@@ -96,9 +96,10 @@ def compress(
     packed_block_size: int,
     coeff_removal: float | None,
 ) -> None:
-    """Transform a BMP or PPM image into a .cim file.
+    """Transform a raster image into a .cim file.
 
-    The input format is taken from the filename suffix: .bmp, .ppm or .pnm.
+    The input format is taken from the filename suffix: .bmp, .ppm, .pnm,
+    .pam, .tif or .tiff.
 
     Args:
         input_path: Image to read.
@@ -136,7 +137,8 @@ def extract(input_path: str, output_path: str) -> None:
 
     Args:
         input_path: The .cim file to read.
-        output_path: Image to write, ending .bmp, .ppm or .pnm.
+        output_path: Image to write, ending .bmp, .ppm, .pnm, .pam, .tif or
+            .tiff.
 
     Raises:
         click.ClickException: If the .cim file is malformed, or the output
