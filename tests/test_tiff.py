@@ -5,7 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from conftest import build_tiff, gradient_pixels, write_bmp, write_ppm, write_tiff
+from conftest import (
+    build_tiff,
+    build_tiff_with_strip_table,
+    gradient_pixels,
+    write_bmp,
+    write_ppm,
+    write_tiff,
+)
 from walsh.exceptions import UnsupportedFileFormatError
 from walsh.image import BMPImage, PPMImage, TIFFImage, reader_for
 
@@ -184,3 +191,49 @@ def test_written_header_layout_is_minimal(tmp_path: Path) -> None:
     tags = [struct.unpack("<H", raw[10 + i * 12 : 12 + i * 12])[0] for i in range(count)]
     assert tags == sorted(tags), "TIFF requires directory entries in tag order"
     assert len(raw) == 8 + 2 + count * 12 + 4 + 6 + 4 * 4 * 3
+
+
+def test_a_final_strip_padded_to_a_whole_row_still_loads(tmp_path: Path) -> None:
+    """RowsPerStrip does not have to divide the height, so the last strip may
+    carry padding. Its byte count then pushes the declared total past the
+    pixels the image holds, which is ordinary and must not be rejected."""
+    width, height = 4, 3
+    row = width * 3
+    payload = bytes(range(2 * row)) + bytes(range(100, 100 + 2 * row))
+    path = tmp_path / "padded.tif"
+    path.write_bytes(
+        build_tiff_with_strip_table(
+            width, height, offsets=[0, 2 * row], counts=[2 * row, 2 * row], payload=payload
+        )
+    )
+
+    image = TIFFImage()
+    image.load(str(path))
+    assert image.get_dimensions() == (width, height)
+    data = image.get_raw_data()
+    assert len(data) == width * height
+    assert data[0] == (0, 1, 2)
+    assert data[-1] == (109, 110, 111)
+
+
+def test_strips_beyond_the_declared_pixels_are_rejected(tmp_path: Path) -> None:
+    """Several entries pointing at one region made the reader accumulate
+    gigabytes for a tiny image. Reads are now clamped to what is outstanding,
+    and a strip with nothing left to contribute is a disagreement worth
+    naming."""
+    width = height = 8
+    repeats = 200
+    chunk = 4096
+    path = tmp_path / "repeated.tif"
+    path.write_bytes(
+        build_tiff_with_strip_table(
+            width,
+            height,
+            offsets=[0] * repeats,
+            counts=[chunk] * repeats,
+            payload=bytes(chunk),
+        )
+    )
+
+    with pytest.raises(UnsupportedFileFormatError, match="lies beyond the 192 bytes"):
+        TIFFImage().load(str(path))

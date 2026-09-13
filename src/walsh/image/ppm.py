@@ -218,8 +218,10 @@ class PPMImage(RasterImage):
             filename: Path to write, or ``None`` to write to stdout.
 
         Raises:
+            ValueError: If the pixel count does not match the dimensions.
             OSError: If the file cannot be written.
         """
+        self._check_complete()
         header = b"%s\n%d %d\n%d\n" % (
             PPM_BINARY_MAGIC,
             self._width,

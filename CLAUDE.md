@@ -70,7 +70,12 @@ per-block Python loop here: that was the whole cost of the codec before 0.4.0.
 
 **`image/`** — a package, one submodule per format. `base.py` defines
 `RasterImage` and **the contract that matters: RGB pixels, top row first,
-whatever the file stores**. `bmp.py` converts both ways (BMP is blue-green-red
+whatever the file stores**. `_check_complete` enforces the other half of that
+contract, `width * height` pixels, and every `save()` calls it before writing a
+byte (0.4.5, #23). It belongs at `save()`, not in the setters: the documented
+`set_dimensions` then `set_raw_data` build is transiently inconsistent by
+design. `CustomizableImage` is deliberately not a `RasterImage` and keeps no
+such invariant. `bmp.py` converts both ways (BMP is blue-green-red
 and bottom-up); `ppm.py`, `pam.py` and `tiff.py` need no conversion.
 
 `_netpbm.py` holds what PPM and PAM share, since their rasters are identical
@@ -84,7 +89,12 @@ the Netpbm tools (`pamvalidate`, `pamtopnm`) are the independent check when
 touching it.
 
 `tiff.py` supports exactly one TIFF profile — uncompressed, RGB, 8-bit, chunky,
-top-left — and rejects everything else by name rather than guessing. It reads
+top-left — and rejects everything else by name rather than guessing. Its strip
+reader clamps every read to the bytes still outstanding (0.4.5, #23): repeated
+strip offsets otherwise let a small file cost hundreds of megabytes. Do not
+"tidy" that into an up-front `sum(counts) > expected` rejection — `RowsPerStrip`
+need not divide the height, so a padded final strip legitimately overshoots and
+real files rely on the surplus being ignored. It reads
 both byte orders (the header declares its own) and multi-strip files; it always
 writes little-endian single-strip. Widening the profile means handling
 `Compression`, `PlanarConfiguration` or `BitsPerSample` in `_validate` and the
@@ -259,6 +269,8 @@ by making RGB top-down the shared in-memory contract. That last change makes
 and flips the image. v0.4.0 vectorised the codec core with byte-identical
 output. v0.4.1 added PAM, v0.4.2 made writes atomic, and v0.4.3 fixed the
 zero-padded edge seam (#18), which changes encoder output for images that need
-padding while leaving every existing `.cim` decoding unchanged.
+padding while leaving every existing `.cim` decoding unchanged. v0.4.4 added a
+code of conduct and v0.4.5 closed three unchecked preconditions in the raster
+layer (#23).
 Partially based on
 https://github.com/ktisha/python2012/tree/dee4beda8e22f3a66a3e31384d4b72ab66102e88/avereshchagin
