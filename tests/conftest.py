@@ -174,6 +174,35 @@ def write_tiff(path: Path, width: int, height: int, pixels: list[Pixel], **kwarg
     return path
 
 
+def write_pam(
+    path: Path,
+    width: int,
+    height: int,
+    pixels: list[Pixel],
+    *,
+    maxval: int = 255,
+    depth: int = 3,
+    tupltype: str | None = "RGB",
+    header_lines: list[str] | None = None,
+) -> Path:
+    """Write a PAM from RGB pixels given top row first.
+
+    With the defaults the header is byte-identical to what Netpbm's own
+    `pamtopam` writes. `depth` and `tupltype` change only what the header
+    claims, not the samples written, which is what the profile-rejection tests
+    need. `header_lines` replaces the generated field lines entirely, for
+    malformed or unusually laid out headers.
+    """
+    if header_lines is None:
+        header_lines = [f"WIDTH {width}", f"HEIGHT {height}", f"DEPTH {depth}", f"MAXVAL {maxval}"]
+        if tupltype is not None:
+            header_lines.append(f"TUPLTYPE {tupltype}")
+    header = "P7\n" + "".join(line + "\n" for line in header_lines) + "ENDHDR\n"
+    body = bytes(channel for pixel in pixels for channel in pixel)
+    path.write_bytes(header.encode() + body)
+    return path
+
+
 def gradient_pixels(width: int, height: int) -> list[Pixel]:
     """A smooth gradient, which the low-frequency codec reproduces well."""
     return [
@@ -200,6 +229,19 @@ def gradient_tiff(tmp_path: Path) -> Path:
     """The same gradient as `gradient_bmp`, as an uncompressed TIFF."""
     width = height = 16
     return write_tiff(tmp_path / "gradient.tif", width, height, gradient_pixels(width, height))
+
+
+@pytest.fixture
+def gradient_pam(tmp_path: Path) -> Path:
+    """The same gradient as `gradient_bmp`, as an RGB PAM."""
+    width = height = 16
+    return write_pam(tmp_path / "gradient.pam", width, height, gradient_pixels(width, height))
+
+
+@pytest.fixture
+def sample_pam() -> Path:
+    """The 400x400 sample pixmap checked in as a PAM."""
+    return _sample("earth.pam")
 
 
 @pytest.fixture

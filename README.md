@@ -91,6 +91,7 @@ picture can be compressed from one format and restored as another:
 walsh compress photo.ppm out.cim
 walsh extract  out.cim restored.bmp     # PPM in, BMP out
 walsh extract  out.cim restored.tif     # or TIFF out
+walsh extract  out.cim restored.pam     # or PAM out
 ```
 
 `compress` accepts `--packed-block-size` (how many low-frequency coefficients
@@ -226,6 +227,7 @@ refuses to accept the same version twice.
 | --- | --- | --- |
 | `.bmp` | Windows bitmap | 24-bit, single plane, uncompressed. Top-down (negative height) files are understood. |
 | `.ppm`, `.pnm` | Netpbm portable pixmap | `P6` binary and `P3` ASCII are read; `P6` is written. Header comments are skipped and a `maxval` below 255 is rescaled. 16-bit samples are rejected. |
+| `.pam` | Netpbm portable arbitrary map | `P7` with `DEPTH 3`, `TUPLTYPE RGB` (or none) and `MAXVAL` up to 255 is read and written; a lower `maxval` is rescaled. Header keys may come in any order, comment and blank lines are skipped. Greyscale, alpha, other tuple types and 16-bit samples are rejected by name. The writer's output is byte-identical to Netpbm's own `pamtopam`. |
 | `.tif`, `.tiff` | Uncompressed baseline TIFF | Both byte orders and multi-strip files are read; little-endian single-strip is written. Only the uncompressed RGB 8-bit chunky profile is supported -- LZW, palette, CMYK, greyscale, 16-bit, planar and rotated files are rejected by name. |
 
 Every reader presents the same in-memory view -- RGB pixels, top row first --

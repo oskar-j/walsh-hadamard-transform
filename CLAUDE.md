@@ -40,9 +40,10 @@ rather than calling `main(argv)` — it no longer returns an int.
 
 `src/` layout, package name `walsh`, built with setuptools. Tests import the
 installed package, so an editable install must exist before `pytest` will work.
-`tests/conftest.py` exposes a `write_bmp` helper plus `gradient_bmp` and
-`sample_bmp` fixtures; test modules import the helper as `from conftest import ...`,
-which works because pytest puts `tests/` on `sys.path`.
+`tests/conftest.py` exposes `write_bmp`, `write_ppm`, `write_pam` and
+`write_tiff` helpers plus `gradient_*` and `sample_*` fixtures per format; test
+modules import the helpers as `from conftest import ...`, which works because
+pytest puts `tests/` on `sys.path`.
 
 ## Architecture
 
@@ -65,7 +66,17 @@ per-block Python loop here: that was the whole cost of the codec before 0.4.0.
 **`image/`** — a package, one submodule per format. `base.py` defines
 `RasterImage` and **the contract that matters: RGB pixels, top row first,
 whatever the file stores**. `bmp.py` converts both ways (BMP is blue-green-red
-and bottom-up); `ppm.py` and `tiff.py` need no conversion.
+and bottom-up); `ppm.py`, `pam.py` and `tiff.py` need no conversion.
+
+`_netpbm.py` holds what PPM and PAM share, since their rasters are identical
+behind different headers: the one-byte sample decoder (one read, a lookup-table
+rescale when `maxval` is below 255, tuples built by `zip` in C; samples above
+`maxval` are rejected by name) and the encoder (`bytes` over a chained
+iterator). `pam.py` supports exactly one profile — `DEPTH 3`, `TUPLTYPE RGB`
+or none, `MAXVAL` ≤ 255 — and rejects the rest by name, like `tiff.py`. Its
+writer emits the header in `pamtopam`'s order, so the two are byte-identical;
+the Netpbm tools (`pamvalidate`, `pamtopnm`) are the independent check when
+touching it.
 
 `tiff.py` supports exactly one TIFF profile — uncompressed, RGB, 8-bit, chunky,
 top-left — and rejects everything else by name rather than guessing. It reads
@@ -88,7 +99,8 @@ filename suffix.
 Adding a format means a new submodule subclassing `RasterImage` plus an entry in
 `SUFFIXES`. Honour the RGB top-down contract there, not in `Task`. The contract
 is what makes the source format irrelevant to the output: `tests/test_task.py`
-asserts that BMP, PPM and TIFF of one picture compress to byte-identical `.cim`.
+asserts that BMP, PPM, PAM and TIFF of one picture compress to byte-identical
+`.cim`.
 
 **`transforms.py`** — `hadamard_matrix(size)` is a **module-level** `@cached`
 function building the orthonormal matrix and sorting rows by sign-change count
@@ -221,6 +233,6 @@ added PPM, split `image.py` into a package, and fixed the BGR/bottom-up quirk**
 by making RGB top-down the shared in-memory contract. That last change makes
 0.1.x `.cim` files incompatible: extracting one with 0.2.0 swaps red and blue
 and flips the image. v0.4.0 vectorised the codec core with byte-identical
-output.
+output. v0.4.1 added PAM.
 Partially based on
 https://github.com/ktisha/python2012/tree/dee4beda8e22f3a66a3e31384d4b72ab66102e88/avereshchagin

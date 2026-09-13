@@ -13,6 +13,9 @@ Two variants exist and both are read:
 The header may carry ``#`` comments between any two tokens, which the parser
 skips. Files whose ``maxval`` is below 255 are rescaled to the full 0-255 range
 on load; ``maxval`` above 255 means 16-bit samples, which are not supported.
+
+The raster after the header is the same as PAM's, so decoding and encoding it
+are shared with :mod:`walsh.image.pam` through :mod:`walsh.image._netpbm`.
 """
 
 from __future__ import annotations
@@ -22,6 +25,7 @@ from typing import BinaryIO
 
 from walsh.exceptions import UnsupportedFileFormatError
 from walsh.image._io import FileSource, open_binary_read, open_binary_write
+from walsh.image._netpbm import NETPBM_MAX_SAMPLE, encode_samples, read_samples, rescale_sample
 from walsh.image.base import RasterImage
 
 __all__ = ["PPM_ASCII_MAGIC", "PPM_BINARY_MAGIC", "PPM_MAX_SAMPLE", "PPMImage"]
@@ -32,7 +36,7 @@ PPM_BINARY_MAGIC = b"P6"
 PPM_ASCII_MAGIC = b"P3"
 
 #: The largest ``maxval`` this reader handles, i.e. one byte per sample.
-PPM_MAX_SAMPLE = 255
+PPM_MAX_SAMPLE = NETPBM_MAX_SAMPLE
 
 _WHITESPACE = b" \t\r\n\v\f"
 _COMMENT = b"#"
@@ -135,21 +139,6 @@ class PPMImage(RasterImage):
             )
         return maxval
 
-    @staticmethod
-    def _rescale(value: int, maxval: int) -> int:
-        """Scale one sample from a 0..maxval range to 0..255.
-
-        Args:
-            value: The raw sample.
-            maxval: The file's declared maximum, in 1..255.
-
-        Returns:
-            The sample expressed against a maximum of 255, rounded to nearest.
-        """
-        if maxval == PPM_MAX_SAMPLE:
-            return value
-        return (value * PPM_MAX_SAMPLE + maxval // 2) // maxval
-
     def _read_binary_data(self, file: BinaryIO, maxval: int) -> None:
         """Read P6 pixel data, one byte per sample.
 
@@ -159,22 +148,9 @@ class PPMImage(RasterImage):
 
         Raises:
             UnsupportedFileFormatError: If the data is shorter than the header
-                promises.
+                promises, or a sample exceeds ``maxval``.
         """
-        expected = self._width * self._height * 3
-        data = file.read(expected)
-        if len(data) < expected:
-            raise UnsupportedFileFormatError(
-                f"truncated PPM data: expected {expected} bytes, got {len(data)}"
-            )
-        self._raw_data = [
-            (
-                self._rescale(data[i], maxval),
-                self._rescale(data[i + 1], maxval),
-                self._rescale(data[i + 2], maxval),
-            )
-            for i in range(0, expected, 3)
-        ]
+        self._raw_data = read_samples(file, self._width * self._height, maxval, "PPM")
 
     def _read_ascii_data(self, file: BinaryIO, maxval: int) -> None:
         """Read P3 pixel data, as whitespace-separated decimal numbers.
@@ -184,8 +160,9 @@ class PPMImage(RasterImage):
             maxval: The declared maximum sample value.
 
         Raises:
-            UnsupportedFileFormatError: If a sample is not a number, or there
-                are fewer samples than the header promises.
+            UnsupportedFileFormatError: If a sample is not a number or exceeds
+                ``maxval``, or there are fewer samples than the header
+                promises.
         """
         expected = self._width * self._height * 3
         samples: list[int] = []
@@ -198,11 +175,12 @@ class PPMImage(RasterImage):
             file.seek(-1, 1)
             raw = self._read_token(file)
             try:
-                samples.append(self._rescale(int(raw), maxval))
+                value = int(raw)
             except ValueError:
                 raise UnsupportedFileFormatError(
                     f"invalid PPM sample: {raw!r} is not a number"
                 ) from None
+            samples.append(rescale_sample(value, maxval, "PPM"))
 
         if len(samples) < expected:
             raise UnsupportedFileFormatError(
@@ -248,7 +226,6 @@ class PPMImage(RasterImage):
             self._height,
             PPM_MAX_SAMPLE,
         )
-        body = bytes(channel for pixel in self._raw_data for channel in pixel)
         with open_binary_write(filename) as file:
             file.write(header)
-            file.write(body)
+            file.write(encode_samples(self._raw_data))
