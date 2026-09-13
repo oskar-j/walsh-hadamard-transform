@@ -284,9 +284,17 @@ class TIFFImage(RasterImage):
         Returns:
             ``width * height * 3`` bytes of interleaved RGB samples.
 
+        Never accumulates more than that: each read is clamped to the bytes
+        still outstanding. Nothing stops a file from pointing several strip
+        entries at one region, and reading them all first would let a 180 KB
+        file cost hundreds of megabytes for an 8x8 image. Clamping returns the
+        same bytes for every file that was readable before, because the strip
+        arrays are in image order however the strips are laid out on disk.
+
         Raises:
             UnsupportedFileFormatError: If the strip tags disagree with each
-                other, or a strip runs past the end of the file.
+                other, a strip runs past the end of the file, or a strip lies
+                entirely beyond the pixels the image declares.
         """
         offsets = entries.get(TAG_STRIP_OFFSETS, ())
         counts = entries.get(TAG_STRIP_BYTE_COUNTS, ())
@@ -297,22 +305,34 @@ class TIFFImage(RasterImage):
                 f"TIFF has {len(offsets)} strip offsets but {len(counts)} byte counts"
             )
 
+        expected = self._width * self._height * SAMPLES_PER_PIXEL
+
         data = bytearray()
         for index, (offset, length) in enumerate(zip(offsets, counts, strict=True)):
+            outstanding = expected - len(data)
+            if outstanding <= 0:
+                # Every strip an encoder writes holds at least one real row, so
+                # a strip with nothing left to contribute means the tags
+                # describe an image other than the one the header declares.
+                raise UnsupportedFileFormatError(
+                    f"TIFF strip {index} of {len(offsets)} lies beyond the {expected} "
+                    f"bytes a {self._width}x{self._height} image holds"
+                )
             file.seek(offset)
-            chunk = file.read(length)
-            if len(chunk) < length:
+            # A final strip padded out to a whole number of rows is ordinary,
+            # so read only what is outstanding rather than rejecting the file.
+            chunk = file.read(min(length, outstanding))
+            if len(chunk) < min(length, outstanding):
                 raise UnsupportedFileFormatError(
                     f"truncated TIFF strip {index}: expected {length} bytes, got {len(chunk)}"
                 )
             data += chunk
 
-        expected = self._width * self._height * SAMPLES_PER_PIXEL
         if len(data) < expected:
             raise UnsupportedFileFormatError(
                 f"truncated TIFF pixel data: expected {expected} bytes, got {len(data)}"
             )
-        return bytes(data[:expected])
+        return bytes(data)
 
     def load(self, filename: FileSource) -> None:
         """Read a TIFF from ``filename``, replacing any current contents.
@@ -344,8 +364,10 @@ class TIFFImage(RasterImage):
             filename: Path to write, or ``None`` to write to stdout.
 
         Raises:
+            ValueError: If the pixel count does not match the dimensions.
             OSError: If the file cannot be written.
         """
+        self._check_complete()
         body = bytes(channel for pixel in self._raw_data for channel in pixel)
 
         # Directory entries must be ordered by tag. The only value too large to

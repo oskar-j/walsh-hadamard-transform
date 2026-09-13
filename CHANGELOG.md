@@ -9,6 +9,64 @@ The `## [x.y.z]` headings are load-bearing: the release workflow extracts the
 section matching the version in `pyproject.toml` and uses it as the GitHub
 Release notes.
 
+## [0.4.5]
+
+### Fixed
+
+Three preconditions the raster layer documented or implied but never checked.
+Closes #23.
+
+- **A BMP declaring a width or height of zero is rejected** rather than
+  accepted silently. A zero width makes the row stride zero, so the truncation
+  guard in `_read_data` compares `0 < 0` and can never fire: the reader looped
+  over the whole declared height against a file holding no pixel data, and the
+  codec then wrote a `.cim` that `walsh extract` could not read back, failing
+  with `range() arg 3 must not be zero`. A declared height of two million took
+  1.7 s and 173 MB to read nothing. PPM and PAM already rejected a dimension of
+  zero; this brings BMP in line. A *negative* height is still legal and still
+  means the rows are stored top-down.
+
+- **TIFF strip reads are bounded by the pixels the header declares.** Nothing
+  stopped several strip entries pointing at the same region, so memory grew as
+  strips times strip size with no cap and no complaint: a 180 KB file made an
+  8x8 image cost 385 MB and still loaded, reporting no error. Each read is now
+  clamped to the bytes still outstanding, and a strip left with nothing to
+  contribute is reported by name. The same file now costs nothing and is
+  refused.
+
+  The obvious check, rejecting `sum(counts) > expected` up front, was
+  deliberately **not** used: `RowsPerStrip` need not divide the height, so a
+  final strip padded to a whole number of rows legitimately overshoots, and
+  such files load correctly today. Clamping returns byte-identical pixels for
+  every file that was readable before, because the strip arrays are in image
+  order however the strips sit on disk. Both cases now have a test.
+
+- **`save()` refuses a pixel count that contradicts the dimensions.**
+  `RasterImage` documents that it holds `width * height` pixels, but nothing
+  enforced it. Too few pixels wrote a file no reader in this package can load,
+  reporting success; too many dropped the surplus silently, and left a BMP
+  whose own size fields contradicted its body. `RasterImage._check_complete`
+  now raises `ValueError`, and every `save()` calls it **before writing any
+  header**, so a rejected save leaves nothing behind.
+
+  The check is at `save()` rather than in the setters, because the documented
+  two-call build, `set_dimensions` then `set_raw_data`, is transiently
+  inconsistent by design. It is scoped to `RasterImage`, so
+  `CustomizableImage`, which legitimately holds dimensions with no blocks, is
+  untouched.
+
+### Notes
+
+- **Codec output is unchanged.** All five checked-in sample outputs reproduce
+  byte for byte, and BMP, PPM, PAM and TIFF of one picture still compress to an
+  identical `.cim`. No valid file changes behaviour; only malformed ones, which
+  now fail by name instead of silently.
+- No CLI user could reach the third defect: `Task.extract` always supplies
+  exactly `width * height` pixels. It is hardening of a public, `py.typed` API
+  that `CONTRIBUTING.md` tells format authors to subclass.
+- 259 to 281 tests, coverage 98.45% to 98.64%; `bmp.py` and `base.py` reach
+  100%. All 22 new assertions fail against the unfixed readers, checked.
+
 ## [0.4.4]
 
 ### Added

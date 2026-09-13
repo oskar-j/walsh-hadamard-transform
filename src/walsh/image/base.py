@@ -79,6 +79,28 @@ class RasterImage(ABC):
         self._width = width
         self._height = height
 
+    def _check_complete(self) -> None:
+        """Verify the pixel count matches the dimensions, before writing.
+
+        The class contract says ``get_raw_data()`` holds ``width * height``
+        pixels, but the two-call build -- :meth:`set_dimensions` then
+        :meth:`set_raw_data` -- is transiently inconsistent by design, so this
+        cannot live in either setter. Every :meth:`save` calls it first
+        instead, and before writing any header: too few pixels used to produce
+        a file that no reader in this package can load, and too many used to
+        drop the surplus with no error at all.
+
+        Raises:
+            ValueError: If the number of pixels held is not exactly
+                ``width * height``.
+        """
+        expected = self._width * self._height
+        if len(self._raw_data) != expected:
+            raise ValueError(
+                f"image holds {len(self._raw_data)} pixel(s) but its dimensions "
+                f"{self._width}x{self._height} require {expected}"
+            )
+
     def get_raw_data(self) -> list[Pixel]:
         """Return the pixels, as RGB triples, top row first.
 

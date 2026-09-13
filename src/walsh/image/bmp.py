@@ -108,8 +108,15 @@ class BMPImage(RasterImage):
         # A negative height means the rows are already stored top-down.
         self._top_down = height < 0
         self._height = abs(height)
-        if self._width < 0:
-            raise UnsupportedFileFormatError(f"negative BMP width: {self._width}")
+        if self._width <= 0 or self._height <= 0:
+            # Zero is the interesting case, not the negative one: a zero width
+            # makes the row stride zero, so the truncation guard in _read_data
+            # compares 0 < 0 and can never fire, and the reader loops over the
+            # declared height against a file with no pixel data at all. PPM and
+            # PAM already reject a dimension of zero; this brings BMP in line.
+            raise UnsupportedFileFormatError(
+                f"BMP dimensions must be positive, got {self._width}x{self._height}"
+            )
 
     def _read_data(self, file: BinaryIO) -> None:
         """Read the pixel array into the top-down RGB contract.
@@ -208,8 +215,10 @@ class BMPImage(RasterImage):
             filename: Path to write, or ``None`` to write to stdout.
 
         Raises:
+            ValueError: If the pixel count does not match the dimensions.
             OSError: If the file cannot be written.
         """
+        self._check_complete()
         with open_binary_write(filename) as file:
             self._write_header(file)
             self._write_data(file)

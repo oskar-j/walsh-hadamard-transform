@@ -203,8 +203,10 @@ class PAMImage(RasterImage):
             filename: Path to write, or ``None`` to write to stdout.
 
         Raises:
+            ValueError: If the pixel count does not match the dimensions.
             OSError: If the file cannot be written.
         """
+        self._check_complete()
         header = b"%s\nWIDTH %d\nHEIGHT %d\nDEPTH %d\nMAXVAL %d\nTUPLTYPE %s\nENDHDR\n" % (
             PAM_MAGIC,
             self._width,

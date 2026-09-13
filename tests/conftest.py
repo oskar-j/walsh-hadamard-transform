@@ -168,6 +168,55 @@ def build_tiff(
     return bytes(out)
 
 
+def build_tiff_with_strip_table(
+    width: int,
+    height: int,
+    offsets: list[int],
+    counts: list[int],
+    payload: bytes,
+) -> bytes:
+    """Build a TIFF whose strip tables are given verbatim, however wrong.
+
+    `build_tiff` derives consistent strip tables from the pixels. This one
+    takes them as they are, so a test can describe strips that overlap, repeat
+    one region, or run past the pixels the header declares -- geometry no
+    encoder produces and `build_tiff` cannot express.
+    """
+    tags = [
+        (256, 4, 1),
+        (257, 4, 1),
+        (258, 3, 3),
+        (259, 3, 1),
+        (262, 3, 1),
+        (273, 4, len(offsets)),
+        (274, 3, 1),
+        (277, 3, 1),
+        (278, 4, 1),
+        (279, 4, len(counts)),
+        (284, 3, 1),
+    ]
+    heap = 8 + 2 + 12 * len(tags) + 4
+    bits_at = heap
+    offs_at = bits_at + 6
+    cnts_at = offs_at + 4 * len(offsets)
+    data_at = cnts_at + 4 * len(counts)
+
+    inline = {256: width, 257: height, 259: 1, 262: 2, 274: 1, 277: 3, 278: height, 284: 1}
+    table = {258: bits_at, 273: offs_at, 279: cnts_at}
+
+    out = bytearray(struct.pack("<2sHI", b"II", 42, 8) + struct.pack("<H", len(tags)))
+    for tag, field_type, count in tags:
+        value = table[tag] if tag in table else inline[tag]
+        out += struct.pack("<HHI", tag, field_type, count)
+        out += struct.pack("<H2x" if (field_type == 3 and count == 1) else "<I", value)
+    out += struct.pack("<I", 0)
+    out += struct.pack("<3H", 8, 8, 8)
+    out += struct.pack(f"<{len(offsets)}I", *(data_at + o for o in offsets))
+    out += struct.pack(f"<{len(counts)}I", *counts)
+    out += payload
+    return bytes(out)
+
+
 def write_tiff(path: Path, width: int, height: int, pixels: list[Pixel], **kwargs: Any) -> Path:
     """Write an uncompressed TIFF from RGB pixels given top row first."""
     path.write_bytes(build_tiff(width, height, pixels, **kwargs))
