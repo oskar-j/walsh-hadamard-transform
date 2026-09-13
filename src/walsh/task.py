@@ -157,7 +157,7 @@ class Task:
     def _slice(
         self, values: npt.ArrayLike, width: int, height: int, block_size: int
     ) -> list[Block]:
-        """Reshape a flat channel into zero-padded square blocks.
+        """Reshape a flat channel into square blocks, padding the edge outwards.
 
         Args:
             values: One channel's samples, row-major, ``width * height`` long.
@@ -167,8 +167,10 @@ class Task:
 
         Returns:
             The blocks in row-major order, each ``block_size`` square. The
-            image is zero-padded up to a whole number of blocks first. The
-            blocks are views into one contiguous array, cut by a single
+            image is first padded up to a whole number of blocks by
+            replicating its last row and column, so the fill carries no
+            content of its own; see the note in the body for why that matters.
+            The blocks are views into one contiguous array, cut by a single
             reshape rather than a split per row and per block.
         """
         plane = np.asarray(values, dtype=np.float64).reshape(height, width)
@@ -183,7 +185,14 @@ class Task:
             height_padding,
             width_padding,
         )
-        plane = np.pad(plane, ((0, height_padding), (0, width_padding)))
+        # Replicate the edge rather than padding with zeros. The padding shares
+        # its blocks with real pixels, and the transform is low-pass, so
+        # whatever fills it is smeared back across the last few real columns
+        # and rows. Zero is black in luma and fully saturated in chroma, which
+        # is why it showed up as a coloured seam; the edge sample is the
+        # cheapest fill that cannot introduce an edge that was not there. This
+        # is what JPEG does for the same reason.
+        plane = np.pad(plane, ((0, height_padding), (0, width_padding)), mode="edge")
 
         rows, columns = plane.shape[0] // block_size, plane.shape[1] // block_size
         # Split each axis into (block index, offset within block), then bring
