@@ -9,6 +9,30 @@ The `## [x.y.z]` headings are load-bearing: the release workflow extracts the
 section matching the version in `pyproject.toml` and uses it as the GitHub
 Release notes.
 
+## [0.4.4]
+
+### Added
+
+- `CODE_OF_CONDUCT.md`: the [Contributor Covenant](https://www.contributor-covenant.org)
+  version 2.1, verbatim from the upstream source with only the reporting
+  placeholder filled in. GitHub recognises the file at the repository root and
+  surfaces it in the Community Standards checklist and on the issue and pull
+  request forms.
+
+  The enforcement contact is the co-ordinator address `CONTRIBUTING.md` already
+  publishes, rather than a second inbox nobody watches. `CONTRIBUTING.md` and
+  the README now link to the document, and `MANIFEST.in` ships it in the sdist
+  alongside `CONTRIBUTING.md` and `CHANGELOG.md`.
+
+  The Contributor Covenant is licensed CC BY 4.0; the upstream Attribution
+  section is kept intact, which is what that licence asks for. It covers the
+  document only and does not affect this project's MIT licence.
+
+### Notes
+
+- No code changed, so the codec is untouched: all five checked-in sample
+  outputs still reproduce byte for byte.
+
 ## [0.4.3]
 
 ### Fixed

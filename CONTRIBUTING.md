@@ -4,6 +4,13 @@
 
 Oskar Jarczyk (`oskar.jarczyk@gmail.com`)
 
+## Code of conduct
+
+This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md), version
+2.1. It applies to issues, pull requests and every other project space. Report
+unacceptable behaviour to the co-ordinator's address above, which is also the
+enforcement contact in that document.
+
 ## Adding features or fixing bugs
 
 * Fork the repo
