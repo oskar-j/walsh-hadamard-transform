@@ -35,6 +35,11 @@ The local `.venv` is Python 3.12. `walsh` is installed as a console script
 `cli.py` uses **click**, not argparse. `main` is a `click.group` with `compress`
 and `extract` subcommands, so tests drive it through `click.testing.CliRunner`
 rather than calling `main(argv)` — it no longer returns an int.
+`_reject_writing_over_the_input` runs first in both subcommands: the pipelines
+read the whole image before writing, so `walsh compress p.bmp p.bmp` used to
+succeed and destroy the original. It compares by `os.path.samefile` when OUTPUT
+exists, so aliases count. It belongs in the CLI, not in `Task`, whose
+`FileSource` may legitimately be `None` for the stdin/stdout path.
 
 ## Layout
 
@@ -92,9 +97,21 @@ and one `np.frombuffer` and written with one `tobytes`; a truncated file still
 reports the index of the first incomplete block. `_io.py` has `align`,
 `open_binary_read` and `open_binary_write` — separate rather than one
 mode-string function, so `open()` gets a literal mode and the handle type is
-known; `open_binary(source, mode)` remains as a delegate. `__init__.py` re-exports everything the pre-0.2.0 single module
-exported, so old imports still work, and owns `reader_for`, which dispatches on
-filename suffix.
+known; `open_binary(source, mode)` remains as a delegate. `__init__.py`
+re-exports everything the pre-0.2.0 single module exported, so old imports
+still work, and owns `reader_for`, which dispatches on filename suffix.
+
+**`open_binary_write` stages every write** (0.4.2, #20): bytes go to a
+`.walsh-*` temporary file in the destination's own directory and reach the
+destination only through `os.replace`, once the caller has returned without
+raising. That is what keeps a mid-write failure — a container field that
+overflows, ENOSPC, EIO — from replacing a good file with a stub. The staging
+file must stay a sibling of the destination: `os.replace` is atomic only
+within one filesystem. Three paths exist to preserve prior behaviour and each
+has a test: a symlink destination is `realpath`-resolved so the link survives,
+a non-regular destination (`/dev/null`, a FIFO) is opened directly because it
+cannot be replaced, and the mode is copied from the destination or derived
+from the umask, since `mkstemp` creates `0o600`.
 
 Adding a format means a new submodule subclassing `RasterImage` plus an entry in
 `SUFFIXES`. Honour the RGB top-down contract there, not in `Task`. The contract
@@ -233,6 +250,6 @@ added PPM, split `image.py` into a package, and fixed the BGR/bottom-up quirk**
 by making RGB top-down the shared in-memory contract. That last change makes
 0.1.x `.cim` files incompatible: extracting one with 0.2.0 swaps red and blue
 and flips the image. v0.4.0 vectorised the codec core with byte-identical
-output. v0.4.1 added PAM.
+output. v0.4.1 added PAM, and v0.4.2 made writes atomic.
 Partially based on
 https://github.com/ktisha/python2012/tree/dee4beda8e22f3a66a3e31384d4b72ab66102e88/avereshchagin

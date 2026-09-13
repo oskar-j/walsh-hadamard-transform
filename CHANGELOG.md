@@ -9,6 +9,66 @@ The `## [x.y.z]` headings are load-bearing: the release workflow extracts the
 section matching the version in `pyproject.toml` and uses it as the GitHub
 Release notes.
 
+## [0.4.2]
+
+### Fixed
+
+- **A failed write no longer destroys the file it was writing over.** Closes #20.
+
+  `open_binary_write` truncated the destination the moment it opened it, so any
+  failure after that point -- an image too large for a container field, a full
+  disk, an I/O error -- replaced the previous contents with a stub while the CLI
+  printed a clean `Error:` line that read like a safe abort. Compressing a
+  4.19 MP or larger image over an existing `.cim` left an 8-byte file behind: a
+  well-formed `<II` header, so a later extract reported a *format* error,
+  indistinguishable from a file that was never valid.
+
+  Writes are now staged. Bytes go to a temporary file in the destination's own
+  directory and are moved onto it with `os.replace` only once the caller has
+  finished without raising; a failure unlinks the staging file and leaves the
+  destination exactly as it was. `os.replace` is atomic within a filesystem,
+  which is why the staging file is a sibling rather than a file in the system
+  temporary directory.
+
+  Three behaviours are preserved deliberately, each with a test: a symlinked
+  destination is resolved first, so the link survives and its target is
+  replaced, as writing through it did before; a destination that is not a
+  regular file, such as `/dev/null` or a FIFO, cannot be replaced and is
+  written directly, as before; and the finished file keeps an existing
+  destination's permissions, or gets `0o666` less the umask when it is new,
+  rather than the `0o600` `mkstemp` creates. One behaviour does change: the
+  destination gets a new inode, so a pre-existing hard link to it keeps the old
+  contents. That is inherent to replace-based atomic writes.
+
+- **`walsh compress photo.bmp photo.bmp` is refused instead of silently
+  destroying the photo.** Both pipelines read the whole image before writing
+  anything, so naming one file twice did not fail: it exited 0 having replaced
+  the original with its own lossy reconstruction, mean absolute error 12.6 on
+  the sample image. The CLI now rejects it with exit code 2 before reading a
+  byte. An existing destination is compared with `os.path.samefile`, so a hard
+  link or a symlink pointing back at the input is caught too; a path that does
+  not exist yet is compared by resolved name. Overwriting a *different*
+  pre-existing output is still allowed -- re-running into the same target is
+  ordinary use.
+
+### Changed
+
+- The stream-helper tests moved from `tests/test_decorators.py`, where they had
+  been since 0.3.2 for want of a better home, into a new `tests/test_io.py`
+  alongside the staging tests.
+
+### Notes
+
+- **Codec output is unchanged.** Only where the bytes land first changed, not
+  what they are: all five checked-in sample outputs still reproduce byte for
+  byte, and PPM, PAM and TIFF of one picture still compress to an identical
+  `.cim`.
+- 237 to 254 tests; `cli.py` and `image/_io.py` are both at 100%, total
+  coverage 98.4%.
+- The `<HHH` block-count ceiling that triggers the compress failure above is
+  still there, and is still ~4.19 MP at the default block size. Staging makes
+  that failure non-destructive; it does not raise the ceiling. That is #19.
+
 ## [0.4.1]
 
 ### Added
