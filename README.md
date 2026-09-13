@@ -99,6 +99,12 @@ per axis to keep -- lower is smaller and lossier), `--y-block-size`,
 `--chroma-block-size` and `--coeff-removal`. Add `-v`/`-vv` for progress
 logging, and see `walsh -h` for the full list.
 
+Writes are atomic: output goes to a temporary file beside the destination and
+replaces it only on success, so a failed run leaves an existing file untouched.
+`walsh` also refuses to write over its own input, since both pipelines read the
+whole image before writing and would otherwise replace the original with a
+lossy reconstruction of itself.
+
 `--coeff-removal` is the second, independent lossy knob: spectral coefficients
 smaller than the given magnitude are zeroed. It does not change the `.cim`
 file's size, because the format stores a fixed count of `int16` values whether

@@ -171,3 +171,103 @@ def test_subcommand_help_lists_the_options(runner: CliRunner) -> None:
         "--coeff-removal",
     ):
         assert option in result.output
+
+
+# -- writing must not destroy what is already there ------------------------
+
+
+@pytest.mark.parametrize("command", ["compress", "extract"])
+def test_output_may_not_be_the_input_file(
+    runner: CliRunner, gradient_bmp: Path, command: str
+) -> None:
+    """Both pipelines read everything before writing, so this used to succeed."""
+    before = gradient_bmp.read_bytes()
+
+    result = runner.invoke(main, [command, str(gradient_bmp), str(gradient_bmp)])
+
+    assert result.exit_code == 2, result.output
+    assert "must not be the same file" in result.output
+    assert gradient_bmp.read_bytes() == before
+
+
+def test_output_may_not_reach_the_input_through_a_symlink(
+    runner: CliRunner, gradient_bmp: Path, tmp_path: Path
+) -> None:
+    """Comparison is by identity, not by name, so an alias is caught too."""
+    alias = tmp_path / "alias.bmp"
+    alias.symlink_to(gradient_bmp)
+    before = gradient_bmp.read_bytes()
+
+    result = runner.invoke(main, ["compress", str(gradient_bmp), str(alias)])
+
+    assert result.exit_code == 2, result.output
+    assert gradient_bmp.read_bytes() == before
+
+
+def test_a_different_output_file_is_still_allowed(
+    runner: CliRunner, gradient_bmp: Path, tmp_path: Path
+) -> None:
+    """The guard must not reject the ordinary case, including a re-run."""
+    output = tmp_path / "out.cim"
+    output.write_bytes(b"a previous run")
+
+    result = runner.invoke(main, ["compress", str(gradient_bmp), str(output)])
+
+    assert result.exit_code == 0, result.output
+    assert output.read_bytes() != b"a previous run"
+
+
+def test_a_failed_compress_leaves_the_existing_output_intact(
+    runner: CliRunner, tmp_path: Path
+) -> None:
+    """More blocks than the .cim header's uint16 count, so the write fails mid-header.
+
+    65536 single-pixel luma blocks overflow `<HHH`, and that raises after
+    `save()` has already opened the destination. Before the write was staged,
+    this replaced whatever was there with an 8-byte stub.
+    """
+    from conftest import gradient_pixels, write_bmp
+
+    source = write_bmp(tmp_path / "big.bmp", 256, 256, gradient_pixels(256, 256))
+    output = tmp_path / "archive.cim"
+    output.write_bytes(b"PREVIOUS ENCODE")
+
+    result = runner.invoke(
+        main,
+        [
+            "compress",
+            "--y-block-size",
+            "1",
+            "--packed-block-size",
+            "1",
+            str(source),
+            str(output),
+        ],
+    )
+
+    assert result.exit_code == 1, result.output
+    # Not the full message: CPython words this differently per version, "'H'
+    # format requires ... 65535" on 3.11+ and "ushort format requires ..." on
+    # 3.10. This much pins the failure to the struct pack, so the test still
+    # notices if the overflow starts being caught before the file is opened.
+    assert "format requires" in result.output
+    assert output.read_bytes() == b"PREVIOUS ENCODE"
+    assert not [p for p in tmp_path.iterdir() if p.name.startswith(".walsh-")]
+
+
+def test_a_failed_extract_leaves_the_existing_output_intact(
+    runner: CliRunner, tmp_path: Path
+) -> None:
+    """Dimensions too large for the BMP header raise after the file is opened."""
+    import struct
+
+    source = tmp_path / "huge.cim"
+    source.write_bytes(struct.pack("<II", 2**31, 0) + struct.pack("<HHH", 8, 4, 0) * 3)
+    output = tmp_path / "existing.bmp"
+    output.write_bytes(b"BM" + b"\x00" * 100)
+    before = output.read_bytes()
+
+    result = runner.invoke(main, ["extract", str(source), str(output)])
+
+    assert result.exit_code == 1, result.output
+    assert output.read_bytes() == before

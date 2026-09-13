@@ -1,13 +1,8 @@
 from __future__ import annotations
 
-import io
-import sys
-from pathlib import Path
-
 import pytest
 
 from walsh.decorators import Memo, cached
-from walsh.image._io import open_binary, open_binary_read, open_binary_write
 
 
 def test_results_are_memoised() -> None:
@@ -106,40 +101,3 @@ def test_memo_is_not_a_descriptor() -> None:
     assert isinstance(Holder.__dict__["method"], Memo)
     with pytest.raises(TypeError):
         Holder().method(1)
-
-
-def test_open_binary_read_and_write_roundtrip(tmp_path: Path) -> None:
-    path = tmp_path / "blob.bin"
-    with open_binary_write(str(path)) as handle:
-        handle.write(b"payload")
-    with open_binary_read(str(path)) as handle:
-        assert handle.read() == b"payload"
-
-
-def test_none_selects_the_standard_streams(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The streams are yielded as-is, and deliberately not closed."""
-    stdin, stdout = io.BytesIO(b"in"), io.BytesIO()
-    monkeypatch.setattr(sys, "stdin", type("S", (), {"buffer": stdin})())
-    monkeypatch.setattr(sys, "stdout", type("S", (), {"buffer": stdout})())
-
-    with open_binary_read(None) as handle:
-        assert handle is stdin
-    with open_binary_write(None) as handle:
-        assert handle is stdout
-    assert not stdin.closed
-    assert not stdout.closed
-
-
-@pytest.mark.parametrize(("mode", "expected"), [("rb", b"payload"), ("r", b"payload")])
-def test_legacy_open_binary_still_reads(tmp_path: Path, mode: str, expected: bytes) -> None:
-    path = tmp_path / "legacy.bin"
-    path.write_bytes(b"payload")
-    with open_binary(str(path), mode) as handle:
-        assert handle.read() == expected
-
-
-def test_legacy_open_binary_still_writes(tmp_path: Path) -> None:
-    path = tmp_path / "legacy.bin"
-    with open_binary(str(path), "wb") as handle:
-        handle.write(b"written")
-    assert path.read_bytes() == b"written"

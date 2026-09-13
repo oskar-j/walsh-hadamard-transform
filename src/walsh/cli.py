@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import os
+from pathlib import Path
 
 import click
 
@@ -21,6 +23,35 @@ CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 
 _INPUT_FILE = click.Path(exists=True, dir_okay=False, readable=True)
 _OUTPUT_FILE = click.Path(dir_okay=False, writable=True)
+
+
+def _reject_writing_over_the_input(input_path: str, output_path: str) -> None:
+    """Refuse to let OUTPUT name the same file as INPUT.
+
+    Both pipelines read the whole image before writing anything, so naming one
+    file twice does not fail -- it silently replaces the original with its own
+    lossy reconstruction. Nothing recovers the discarded coefficients
+    afterwards, so this is checked before a single byte is read.
+
+    Args:
+        input_path: The image or ``.cim`` file to read.
+        output_path: Where the result would be written.
+
+    Raises:
+        click.UsageError: If the two paths name one file. Hard links and
+            symlinks count, which is why an existing destination is compared
+            by identity rather than by name.
+    """
+    try:
+        same = os.path.samefile(input_path, output_path)
+    except OSError:
+        # OUTPUT does not exist yet, so there is no inode to compare against.
+        same = Path(output_path).resolve() == Path(input_path).resolve()
+    if same:
+        raise click.UsageError(
+            f"OUTPUT must not be the same file as INPUT ({input_path!r}); "
+            f"the original would be replaced by a lossy reconstruction of itself"
+        )
 
 
 def _run(task: Task) -> None:
@@ -111,7 +142,9 @@ def compress(
 
     Raises:
         click.ClickException: If the image cannot be read or is malformed.
+        click.UsageError: If OUTPUT names the same file as INPUT.
     """
+    _reject_writing_over_the_input(input_path, output_path)
     task = Task(
         y_block_size=y_block_size,
         cb_block_size=chroma_block_size,
@@ -143,7 +176,9 @@ def extract(input_path: str, output_path: str) -> None:
     Raises:
         click.ClickException: If the .cim file is malformed, or the output
             suffix names a format that is not supported.
+        click.UsageError: If OUTPUT names the same file as INPUT.
     """
+    _reject_writing_over_the_input(input_path, output_path)
     _run(Task().with_action(Action.EXTRACT).with_input(input_path).with_output(output_path))
 
 
