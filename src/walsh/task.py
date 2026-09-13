@@ -12,7 +12,15 @@ import numpy as np
 import numpy.typing as npt
 
 from walsh.colors import rgb_to_ycbcr, ycbcr_to_rgb
-from walsh.image import BlockDescription, CustomizableImage, FileSource, Pixel, reader_for
+from walsh.exceptions import UnsupportedFileFormatError
+from walsh.image import (
+    MAX_BLOCKS_PER_CHANNEL,
+    BlockDescription,
+    CustomizableImage,
+    FileSource,
+    Pixel,
+    reader_for,
+)
 from walsh.transforms import WalshHadamardTransform
 
 __all__ = ["Action", "Task"]
@@ -154,6 +162,74 @@ class Task:
         """
         return ((x - 1) // a + 1) * a - x
 
+    @staticmethod
+    def _count_blocks(width: int, height: int, block_size: int) -> int:
+        """Work out how many blocks a plane of this size will be cut into.
+
+        Matches what :meth:`_slice` produces, without building anything: the
+        image is padded up to a whole number of blocks on each axis.
+
+        Args:
+            width: Image width in pixels.
+            height: Image height in pixels.
+            block_size: Edge length of the blocks.
+
+        Returns:
+            The block count, row-major blocks per row times blocks per column.
+        """
+        return ((width - 1) // block_size + 1) * ((height - 1) // block_size + 1)
+
+    def _check_fits_the_container(self, width: int, height: int) -> None:
+        """Reject an image with more blocks than ``.cim`` can count.
+
+        The container stores each channel's block count in a 16-bit field, so
+        at the default 8-pixel luma block the codec caps out near 4.19
+        megapixels -- below any phone photo. The overflow used to surface from
+        ``struct.pack`` while writing the header, naming neither the channel,
+        the limit, nor the option that raises it, and only after the whole
+        image had been read, converted and transformed. The count follows from
+        the dimensions alone, so it is checked here instead, before any of that
+        work happens.
+
+        Args:
+            width: Image width in pixels.
+            height: Image height in pixels.
+
+        Raises:
+            UnsupportedFileFormatError: If any channel would need more than
+                ``MAX_BLOCKS_PER_CHANNEL`` blocks. The message names the
+                channel, its count, the limit, and the block size that would
+                bring the image inside it.
+        """
+        channels = (
+            ("luma", self._y_block_size),
+            ("Cb", self._cb_block_size),
+            ("Cr", self._cr_block_size),
+        )
+        for channel, block_size in channels:
+            blocks = self._count_blocks(width, height, block_size)
+            if blocks <= MAX_BLOCKS_PER_CHANNEL:
+                continue
+            # The count falls by the square of the block size, so this is the
+            # smallest power of two that brings the image inside the limit.
+            sufficient = block_size
+            while self._count_blocks(width, height, sufficient) > MAX_BLOCKS_PER_CHANNEL:
+                sufficient *= 2
+            option = "--y-block-size" if channel == "luma" else "--chroma-block-size"
+            ceiling = MAX_BLOCKS_PER_CHANNEL * block_size * block_size
+            in_words = (
+                f"{ceiling / 1_000_000:.1f} megapixels"
+                if ceiling >= 1_000_000
+                else f"{ceiling} pixels"
+            )
+            raise UnsupportedFileFormatError(
+                f"image is too large for the .cim container: a {width}x{height} image "
+                f"needs {blocks} {channel} blocks of {block_size} pixels, and the format "
+                f"stores at most {MAX_BLOCKS_PER_CHANNEL} per channel, which is "
+                f"{in_words} at this block size. "
+                f"Retry with {option} {sufficient} or larger, or scale the image down."
+            )
+
     def _slice(
         self, values: npt.ArrayLike, width: int, height: int, block_size: int
     ) -> list[Block]:
@@ -240,8 +316,9 @@ class Task:
         or PPM without being told which.
 
         Raises:
-            UnsupportedFileFormatError: If the input suffix is unknown, or the
-                file is not valid for its format.
+            UnsupportedFileFormatError: If the input suffix is unknown, the
+                file is not valid for its format, or the image needs more
+                blocks than the ``.cim`` container can count.
             OSError: If either file cannot be opened.
         """
         log.info("compressing %s -> %s", self._input, self._output)
@@ -250,6 +327,7 @@ class Task:
         source_image.load(self._input)
 
         width, height = source_image.get_dimensions()
+        self._check_fits_the_container(width, height)
         ycbcr = rgb_to_ycbcr(_pixels_to_array(source_image.get_raw_data()))
 
         blocks = {

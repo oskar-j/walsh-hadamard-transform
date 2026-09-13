@@ -22,7 +22,12 @@ from walsh.image.bmp import (
     BMP_SIGNATURE,
     BMPImage,
 )
-from walsh.image.cim import COEFF_DTYPE, BlockDescription, CustomizableImage
+from walsh.image.cim import (
+    COEFF_DTYPE,
+    MAX_BLOCKS_PER_CHANNEL,
+    BlockDescription,
+    CustomizableImage,
+)
 from walsh.image.pam import PAM_DEPTH, PAM_MAGIC, PAM_TUPLTYPE, PAMImage
 from walsh.image.ppm import PPM_ASCII_MAGIC, PPM_BINARY_MAGIC, PPM_MAX_SAMPLE, PPMImage
 from walsh.image.tiff import TIFF_BIG_ENDIAN, TIFF_LITTLE_ENDIAN, TIFF_MAGIC, TIFFImage
@@ -33,6 +38,7 @@ __all__ = [
     "BMP_PIXEL_OFFSET",
     "BMP_SIGNATURE",
     "COEFF_DTYPE",
+    "MAX_BLOCKS_PER_CHANNEL",
     "PAM_DEPTH",
     "PAM_MAGIC",
     "PAM_TUPLTYPE",

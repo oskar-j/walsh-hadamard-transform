@@ -102,7 +102,15 @@ strip reader, not loosening the checks. `cim.py` holds
 `CustomizableImage`, the `.cim` container: `<II` dimensions, three `<HHH`
 `BlockDescription` records (Y, Cb, Cr), then coefficients as little-endian
 `int16` — its channel dicts are keyed `"y"`, `"cb"`, `"cr"` and rely on dict
-insertion order matching the on-disk order. A channel is read with one `read`
+insertion order matching the on-disk order. `number_of_blocks` is a `H`, so
+`MAX_BLOCKS_PER_CHANNEL` is 65535 and the codec caps out near 4.2 MP at the
+default 8-pixel luma block. `Task._check_fits_the_container` rejects an
+oversized image up front, naming the channel and the block size that would fit
+(0.4.6, #19); `set_descriptions` re-checks as a backstop. Widening the field
+would raise the ceiling and break every existing `.cim`, so it is a format
+decision rather than a fix. Do not "simplify" by deriving the count from the
+dimensions: a zero count is the meaningful "empty channel, fill with a neutral"
+state that `extract` relies on. A channel is read with one `read`
 and one `np.frombuffer` and written with one `tobytes`; a truncated file still
 reports the index of the first incomplete block. `_io.py` has `align`,
 `open_binary_read` and `open_binary_write` — separate rather than one
@@ -270,7 +278,8 @@ and flips the image. v0.4.0 vectorised the codec core with byte-identical
 output. v0.4.1 added PAM, v0.4.2 made writes atomic, and v0.4.3 fixed the
 zero-padded edge seam (#18), which changes encoder output for images that need
 padding while leaving every existing `.cim` decoding unchanged. v0.4.4 added a
-code of conduct and v0.4.5 closed three unchecked preconditions in the raster
-layer (#23).
+code of conduct, v0.4.5 closed three unchecked preconditions in the raster
+layer (#23), and v0.4.6 made the container's 4.2 MP block-count ceiling an
+up-front, actionable error (#19).
 Partially based on
 https://github.com/ktisha/python2012/tree/dee4beda8e22f3a66a3e31384d4b72ab66102e88/avereshchagin

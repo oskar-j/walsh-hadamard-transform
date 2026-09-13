@@ -106,6 +106,11 @@ replaces it only on success, so a failed run leaves an existing file untouched.
 whole image before writing and would otherwise replace the original with a
 lossy reconstruction of itself.
 
+The `.cim` container counts each channel's blocks in a 16-bit field, so at the
+default 8-pixel luma block an image must be under about 4.2 megapixels. Larger
+images are refused with a message naming the block size that would fit them:
+`--y-block-size 16` roughly quadruples the ceiling, at some cost in detail.
+
 `--coeff-removal` is the second, independent lossy knob: spectral coefficients
 smaller than the given magnitude are zeroed. It does not change the `.cim`
 file's size, because the format stores a fixed count of `int16` values whether
