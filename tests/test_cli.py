@@ -246,8 +246,13 @@ def test_a_failed_compress_leaves_the_existing_output_intact(
     )
 
     assert result.exit_code == 1, result.output
-    assert "65535" in result.output
+    # Not the full message: CPython words this differently per version, "'H'
+    # format requires ... 65535" on 3.11+ and "ushort format requires ..." on
+    # 3.10. This much pins the failure to the struct pack, so the test still
+    # notices if the overflow starts being caught before the file is opened.
+    assert "format requires" in result.output
     assert output.read_bytes() == b"PREVIOUS ENCODE"
+    assert not [p for p in tmp_path.iterdir() if p.name.startswith(".walsh-")]
 
 
 def test_a_failed_extract_leaves_the_existing_output_intact(
