@@ -9,6 +9,62 @@ The `## [x.y.z]` headings are load-bearing: the release workflow extracts the
 section matching the version in `pyproject.toml` and uses it as the GitHub
 Release notes.
 
+## [0.4.3]
+
+### Fixed
+
+- **Images whose dimensions are not a multiple of the block size no longer come
+  back with a corrupted edge.** Closes #18.
+
+  `Task._slice` padded each plane up to a whole number of blocks with zeros.
+  The padding shares its blocks with real pixels and the transform is low-pass,
+  so whatever fills the padding is smeared back over the last few real columns
+  and rows. Zero is black in luma and fully saturated in chroma, so it showed
+  up as a coloured seam. Solid orange 17 pixels wide came back with a pure
+  green final column, off by 200 of 255. A 1x1 image, smaller than every block
+  and therefore entirely padding, was destroyed outright.
+
+  The padding now replicates the last row and column (`mode="edge"`), which is
+  what JPEG does for the same reason: the fill carries no content of its own,
+  so it cannot introduce an edge that was not in the picture.
+
+  Measured on a flat colour at every width from 16 to 24, the worst channel
+  error falls from 200 to 1, which is what an exactly aligned image already
+  scored. On the Blue Marble sample cropped off-alignment:
+
+  | size | PSNR before | PSNR after |
+  | --- | --- | --- |
+  | 400x400 (aligned) | 25.07 dB | 25.07 dB |
+  | 399x400 | 25.00 dB | 25.06 dB |
+  | 398x398 | 24.72 dB | 25.03 dB |
+  | 397x395 | 24.76 dB | 24.99 dB |
+
+  The mean understates it, because the damage is confined to the seam: at
+  398x398 the last column's mean absolute error drops from 24.08 to 0.68 and
+  its worst pixel from 101 to 5, against an interior mean of 7.9.
+
+  This affected roughly 15 of every 16 arbitrary sizes, on the default path,
+  with no unusual options. It survived to 0.4.2 because nothing could see it:
+  the only test for non-multiple dimensions used 20x20, and a reconstruction is
+  constant on 4-wide tiles, so a pad boundary landing on a multiple of 4 is
+  exactly representable whatever the padding holds. `data/earth.ppm` is 400x400
+  and equally clean. That test now uses 18x18 and asserts on pixels rather than
+  only on the dimensions, and a flat colour is round-tripped at 17x16, 18x18,
+  16x19, 23x21 and 1x1.
+
+### Notes
+
+- **This changes `.cim` bytes for images that need padding, and only those.**
+  The encoder is what changed: `_slice` is called only from `compress`, so
+  **every existing `.cim` file still decodes to exactly the same pixels**,
+  verified by decoding a 0.4.2-written file under both versions and comparing
+  byte for byte. All five checked-in sample outputs also reproduce byte for
+  byte, since they derive from a 400x400 source that needs no padding at all.
+  Images that are a multiple of 16 on both axes are unaffected; anything else
+  re-encodes differently, and better.
+- 254 to 259 tests. The five new ones and the two tightened ones all fail
+  against the old padding, checked.
+
 ## [0.4.2]
 
 ### Fixed

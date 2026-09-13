@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from walsh.exceptions import UnsupportedFileFormatError
-from walsh.image import BMPImage, reader_for
+from walsh.image import BMPImage, PPMImage, reader_for
 from walsh.task import Action, Task, _array_to_pixels, _pixels_to_array
 
 
@@ -55,10 +55,15 @@ def test_smaller_packed_block_size_produces_a_smaller_file(
 def test_non_multiple_dimensions_are_padded_and_cropped_back(
     tmp_path: Path,
 ) -> None:
-    """A 20x20 image is not a multiple of the 16-wide chroma block."""
+    """An 18x18 image is a multiple of neither block size nor of the packed 4.
+
+    20x20 was used here until 0.4.3 and hid the padding bug entirely: the
+    reconstruction is constant on 4-wide tiles, so a pad boundary that lands on
+    a multiple of 4 is exactly representable whatever the padding contains.
+    """
     from conftest import write_bmp
 
-    width = height = 20
+    width = height = 18
     pixels = [(x * 12 % 256, y * 12 % 256, 128) for y in range(height) for x in range(width)]
     source = write_bmp(tmp_path / "odd.bmp", width, height, pixels)
 
@@ -71,6 +76,14 @@ def test_non_multiple_dimensions_are_padded_and_cropped_back(
     image.load(str(restored))
     assert image.get_dimensions() == (width, height)
     assert len(image.get_raw_data()) == width * height
+
+    before = np.asarray(pixels, dtype=float).reshape(height, width, 3)
+    after = np.asarray(image.get_raw_data(), dtype=float).reshape(height, width, 3)
+    # The edge columns and rows must be no worse than the interior. Padding
+    # with zeros put them an order of magnitude out.
+    interior = np.abs(before[:-1, :-1] - after[:-1, :-1]).mean()
+    assert np.abs(before[:, -1] - after[:, -1]).mean() < interior + 5
+    assert np.abs(before[-1, :] - after[-1, :]).mean() < interior + 5
 
 
 def test_padding_size_helper() -> None:
@@ -271,11 +284,13 @@ def test_slice_cuts_blocks_row_major_and_merge_inverts_it() -> None:
     assert all(b.shape == (block, block) for b in blocks)
     # Block 1 is the top row, second column: columns 8-15 of rows 0-7.
     np.testing.assert_array_equal(blocks[1], plane[0:8, 8:16])
-    # Block 5 is the last one: rows 8-12 and columns 16-19 are picture, the
-    # rest is zero padding.
+    # Block 5 is the last one: rows 8-12 and columns 16-19 are picture, and
+    # the rest replicates the edge rather than being zeroed.
     np.testing.assert_array_equal(blocks[5][:5, :4], plane[8:13, 16:20])
-    assert not blocks[5][5:, :].any()
-    assert not blocks[5][:, 4:].any()
+    for row in blocks[5][5:]:
+        np.testing.assert_array_equal(row, blocks[5][4])
+    for column in blocks[5][:, 4:].T:
+        np.testing.assert_array_equal(column, blocks[5][:, 3])
 
     np.testing.assert_array_equal(Task._merge(blocks, width, height), plane)
 
@@ -306,3 +321,30 @@ def test_extract_fills_channels_without_blocks_with_neutral_values(tmp_path: Pat
     pixels = _pixels(restored)
     assert pixels.shape == (15, 3)
     assert not pixels.any()
+
+
+@pytest.mark.parametrize(("width", "height"), [(17, 16), (18, 18), (16, 19), (23, 21), (1, 1)])
+def test_a_flat_colour_survives_at_any_size(width: int, height: int, tmp_path: Path) -> None:
+    """The padding regression, at its most visible.
+
+    A single flat colour has no detail to lose, so the codec should return it
+    almost exactly whatever the dimensions. Before 0.4.3 the padding was zeros,
+    which the low-pass reconstruction smeared back over the last columns and
+    rows: solid orange came back with a pure green edge, off by 200 of 255.
+    1x1 is the extreme case, smaller than every block, so it was entirely
+    padding.
+    """
+    from conftest import write_ppm
+
+    colour = (200, 30, 60)
+    source = write_ppm(tmp_path / "flat.ppm", width, height, [colour] * (width * height))
+    compressed = tmp_path / "flat.cim"
+    restored = tmp_path / "flat-back.ppm"
+
+    Task().with_action("compress").with_input(str(source)).with_output(str(compressed)).run()
+    Task().with_action("extract").with_input(str(compressed)).with_output(str(restored)).run()
+
+    image = PPMImage()
+    image.load(str(restored))
+    got = np.asarray(image.get_raw_data(), dtype=int)
+    assert np.abs(got - np.asarray(colour)).max() <= 2, f"worst pixel {got.max()}"

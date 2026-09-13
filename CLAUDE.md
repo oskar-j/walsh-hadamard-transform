@@ -169,8 +169,15 @@ traceback on truncated input.
 The transform is lossless and involutive. The loss is in
 `CustomizableImage.set_data`, which crops each block to its top-left
 `packed_block_size` square — at the default 4 that is 16 of 64 luma
-coefficients and 16 of 256 chroma coefficients. `Task._slice` zero-pads the
-image up to a block multiple; `Task._merge` crops the padding back off.
+coefficients and 16 of 256 chroma coefficients. `Task._slice` pads the image
+up to a block multiple **by replicating its last row and column**
+(`mode="edge"`), and `Task._merge` crops the padding back off. The padding
+shares its blocks with real pixels and the transform is low-pass, so whatever
+fills it is smeared back over the last few real columns and rows: zero-filling
+put a black-and-saturated seam there, off by up to 200 of 255 on flat colour
+(fixed in 0.4.3, #18). Do not change this back, and note that `reflect` is not
+a drop-in alternative — it raises when the pad is wider than the image, which
+happens for anything under 16 pixels.
 `with_coeff_removal` is a second, independent lossy knob, off by default. It
 thresholds *spectral coefficients*, not matrix entries — every entry of an
 orthonormal Hadamard matrix has the same magnitude, so a threshold on the
@@ -250,6 +257,8 @@ added PPM, split `image.py` into a package, and fixed the BGR/bottom-up quirk**
 by making RGB top-down the shared in-memory contract. That last change makes
 0.1.x `.cim` files incompatible: extracting one with 0.2.0 swaps red and blue
 and flips the image. v0.4.0 vectorised the codec core with byte-identical
-output. v0.4.1 added PAM, and v0.4.2 made writes atomic.
+output. v0.4.1 added PAM, v0.4.2 made writes atomic, and v0.4.3 fixed the
+zero-padded edge seam (#18), which changes encoder output for images that need
+padding while leaving every existing `.cim` decoding unchanged.
 Partially based on
 https://github.com/ktisha/python2012/tree/dee4beda8e22f3a66a3e31384d4b72ab66102e88/avereshchagin
