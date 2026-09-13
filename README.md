@@ -35,7 +35,8 @@ It is also a crucial part of *Grover's algorithm* and *Shor's algorithm* in quan
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the development setup, the checks CI
-runs, and the conventions this codebase follows.
+runs, and the conventions this codebase follows. Participation is covered by
+the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Acknowledgement
 
