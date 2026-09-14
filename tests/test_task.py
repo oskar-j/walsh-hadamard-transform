@@ -348,3 +348,95 @@ def test_a_flat_colour_survives_at_any_size(width: int, height: int, tmp_path: P
     image.load(str(restored))
     got = np.asarray(image.get_raw_data(), dtype=int)
     assert np.abs(got - np.asarray(colour)).max() <= 2, f"worst pixel {got.max()}"
+
+
+# -- the .cim container's 16-bit block count -------------------------------
+
+
+@pytest.mark.parametrize(
+    ("width", "height", "block"),
+    [(13, 7, 8), (16, 16, 8), (2040, 2040, 8), (2048, 2048, 8), (4000, 2000, 8), (4032, 3024, 16)],
+)
+def test_block_count_is_predictable_without_slicing(width: int, height: int, block: int) -> None:
+    """The check runs before any work, so its arithmetic must match _slice exactly."""
+    plane = np.zeros(width * height)
+    assert Task._count_blocks(width, height, block) == len(
+        Task()._slice(plane, width, height, block)
+    )
+
+
+def test_an_image_at_the_limit_is_accepted() -> None:
+    """2040x2040 is 255x255 = 65025 luma blocks, just inside the 16-bit field."""
+    Task()._check_fits_the_container(2040, 2040)
+
+
+@pytest.mark.parametrize(
+    ("width", "height", "channel", "blocks"),
+    [
+        (2048, 2048, "luma", 65536),  # 256x256, one block over
+        (4032, 3024, "luma", 190512),  # a stock 12 MP phone photo
+        (4000, 2000, "luma", 125000),  # non-square, so the check cannot assume squares
+    ],
+)
+def test_an_image_past_the_limit_is_rejected_with_a_useful_message(
+    width: int, height: int, channel: str, blocks: int
+) -> None:
+    """It used to surface as struct.error naming neither channel nor limit."""
+    with pytest.raises(UnsupportedFileFormatError) as caught:
+        Task()._check_fits_the_container(width, height)
+
+    message = str(caught.value)
+    assert f"{width}x{height}" in message
+    assert f"{blocks} {channel} blocks" in message
+    assert "65535" in message
+    assert "--y-block-size" in message
+
+
+def test_the_block_size_the_message_suggests_actually_works() -> None:
+    """An unactionable error is barely better than the struct one it replaced."""
+    import re
+
+    with pytest.raises(UnsupportedFileFormatError) as caught:
+        Task()._check_fits_the_container(4032, 3024)
+
+    suggested = re.search(r"--y-block-size (\d+)", str(caught.value))
+    assert suggested, str(caught.value)
+    Task(y_block_size=int(suggested.group(1)))._check_fits_the_container(4032, 3024)
+
+
+def test_the_chroma_channel_is_checked_too_and_names_its_own_option() -> None:
+    """Luma binds at the defaults, so chroma needs a configuration to surface."""
+    task = Task(y_block_size=64, cb_block_size=8, cr_block_size=8)
+    with pytest.raises(UnsupportedFileFormatError, match="Cb blocks"):
+        task._check_fits_the_container(2048, 2048)
+
+
+def test_compress_rejects_an_oversized_image_before_touching_the_output(
+    tmp_path: Path,
+) -> None:
+    """End to end, using a 1-pixel block so the boundary costs 65536 pixels, not 4 million."""
+    from conftest import gradient_pixels, write_ppm
+
+    source = write_ppm(tmp_path / "big.ppm", 256, 256, gradient_pixels(256, 256))
+    output = tmp_path / "existing.cim"
+    output.write_bytes(b"A PREVIOUS ENCODE")
+
+    task = Task(y_block_size=1, packed_block_size=1)
+    with pytest.raises(UnsupportedFileFormatError, match=r"too large for the \.cim container"):
+        task.with_action("compress").with_input(str(source)).with_output(str(output)).run()
+
+    assert output.read_bytes() == b"A PREVIOUS ENCODE"
+
+
+def test_the_same_image_compresses_with_a_larger_block(tmp_path: Path) -> None:
+    """The documented escape hatch has to stay real."""
+    from conftest import gradient_pixels, write_ppm
+
+    source = write_ppm(tmp_path / "big.ppm", 256, 256, gradient_pixels(256, 256))
+    output = tmp_path / "out.cim"
+
+    Task(y_block_size=2, packed_block_size=1).with_action("compress").with_input(
+        str(source)
+    ).with_output(str(output)).run()
+
+    assert output.stat().st_size > 0

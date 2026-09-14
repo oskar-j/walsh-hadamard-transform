@@ -9,6 +9,60 @@ The `## [x.y.z]` headings are load-bearing: the release workflow extracts the
 section matching the version in `pyproject.toml` and uses it as the GitHub
 Release notes.
 
+## [0.4.6]
+
+### Fixed
+
+- **An image too large for the `.cim` container is now refused with a message
+  that says so.** Closes #19.
+
+  The container stores each channel's block count in a 16-bit field, so at the
+  default 8-pixel luma block the codec caps out at 65535 blocks, about 4.2
+  megapixels. That is below any phone photo or 4K frame. Larger input died
+  with `Error: 'H' format requires 0 <= number <= 65535` -- naming no file,
+  dimension, channel or limit -- and only after the whole image had been read,
+  colour-converted and transformed.
+
+  The block count follows from the dimensions and the configured block sizes
+  alone, so `Task.compress` now checks it as soon as the dimensions are known,
+  before any of that work. A 12 megapixel photo is refused in about a second
+  rather than failing after the full pipeline:
+
+  ```
+  Error: image is too large for the .cim container: a 4032x3024 image needs
+  190512 luma blocks of 8 pixels, and the format stores at most 65535 per
+  channel, which is 4.2 megapixels at this block size. Retry with
+  --y-block-size 16 or larger, or scale the image down.
+  ```
+
+  The suggested block size is computed, not guessed, and a test asserts that
+  compressing with it actually succeeds. Chroma is checked the same way and
+  names `--chroma-block-size` instead.
+
+- `CustomizableImage.set_descriptions` raises `ValueError` for a block count
+  the field cannot hold, as a backstop for callers building a container
+  directly rather than through `Task`. `MAX_BLOCKS_PER_CHANNEL` is exported
+  from `walsh.image` so the limit has a name.
+
+### Notes
+
+- **The container format is unchanged, deliberately.** Widening the count
+  field to 32 bits would raise the ceiling but break every existing `.cim`
+  exactly as 0.2.0 did. That is a separate decision, not a bug fix, so this
+  release reports the limit rather than moving it. `--y-block-size 16` remains
+  the escape hatch and is now discoverable, since the error names it.
+- **Codec output is unchanged.** Every image that compresses today is under
+  the limit and takes the same path: all five checked-in sample outputs
+  reproduce byte for byte, and BMP, PPM, PAM and TIFF of one picture still
+  produce an identical `.cim`.
+- `tests/test_cli.py`'s atomic-write regression test was re-pointed. It used
+  this overflow as its example of a failure occurring *after* the output is
+  opened, and the new up-front check means that no longer reaches the writer --
+  its own assertion caught that. It now uses an oversized `--packed-block-size`,
+  and was re-checked against a non-atomic writer to confirm it still fails
+  there.
+- 281 to 296 tests, coverage 98.64% to 98.68%; `task.py` is back to 100%.
+
 ## [0.4.5]
 
 ### Fixed

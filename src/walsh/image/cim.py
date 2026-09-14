@@ -17,7 +17,12 @@ import numpy.typing as npt
 from walsh.exceptions import UnsupportedFileFormatError
 from walsh.image._io import FileSource, open_binary_read, open_binary_write
 
-__all__ = ["COEFF_DTYPE", "BlockDescription", "CustomizableImage"]
+__all__ = [
+    "COEFF_DTYPE",
+    "MAX_BLOCKS_PER_CHANNEL",
+    "BlockDescription",
+    "CustomizableImage",
+]
 
 Block = npt.NDArray[np.float64]
 
@@ -28,6 +33,15 @@ COEFF_MAX = int(np.iinfo(COEFF_DTYPE).max)
 
 #: Channel keys, in the order they appear on disk.
 CHANNELS = ("y", "cb", "cr")
+
+#: The most blocks one channel can describe. ``DESCRIPTION_FORMAT`` stores
+#: ``number_of_blocks`` in a ``H``, an unsigned 16-bit field, so this is the
+#: container's own ceiling and not a policy choice. At the default 8-pixel luma
+#: block it caps an image at roughly 4.19 megapixels; a larger block size raises
+#: it by the square of the ratio. Widening the field would change the on-disk
+#: format and break every existing ``.cim``, so callers are expected to check
+#: against this and report, rather than to silently truncate.
+MAX_BLOCKS_PER_CHANNEL = 0xFFFF
 
 
 class BlockDescription(NamedTuple):
@@ -222,7 +236,27 @@ class CustomizableImage:
             y_description: Layout of the luma channel.
             cb_description: Layout of the blue-difference chroma channel.
             cr_description: Layout of the red-difference chroma channel.
+
+        Raises:
+            ValueError: If a channel declares more blocks than the container's
+                16-bit count field can hold. Without this the overflow would
+                surface from ``struct.pack`` during :meth:`save`, as a message
+                naming neither the channel nor the limit. :class:`~walsh.task.Task`
+                checks the same bound from the image dimensions before doing any
+                work; this is the backstop for callers building a container
+                directly.
         """
+        for channel, description in (
+            ("y", y_description),
+            ("cb", cb_description),
+            ("cr", cr_description),
+        ):
+            if description.number_of_blocks > MAX_BLOCKS_PER_CHANNEL:
+                raise ValueError(
+                    f"{channel} channel declares {description.number_of_blocks} blocks, "
+                    f"but a .cim block count is a 16-bit field holding at most "
+                    f"{MAX_BLOCKS_PER_CHANNEL}"
+                )
         self._descriptions["y"] = BlockDescription(*y_description)
         self._descriptions["cb"] = BlockDescription(*cb_description)
         self._descriptions["cr"] = BlockDescription(*cr_description)

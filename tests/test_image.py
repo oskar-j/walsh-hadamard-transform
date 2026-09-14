@@ -347,3 +347,24 @@ def test_save_accepts_an_exactly_matching_pixel_count(tmp_path: Path, cls_name: 
     path = tmp_path / "right.out"
     image.save(str(path))
     assert path.stat().st_size > 0
+
+
+def test_set_descriptions_rejects_a_block_count_the_field_cannot_hold() -> None:
+    """The backstop for callers building a container directly rather than via Task.
+
+    Without it the overflow surfaced from struct.pack during save(), naming
+    neither the channel nor the limit.
+    """
+    from walsh.image import MAX_BLOCKS_PER_CHANNEL
+
+    image = CustomizableImage()
+    ok = BlockDescription(8, 4, MAX_BLOCKS_PER_CHANNEL)
+    too_many = BlockDescription(8, 4, MAX_BLOCKS_PER_CHANNEL + 1)
+
+    image.set_descriptions(ok, ok, ok)  # exactly at the limit is fine
+
+    for position in range(3):
+        descriptions = [ok, ok, ok]
+        descriptions[position] = too_many
+        with pytest.raises(ValueError, match="16-bit field"):
+            CustomizableImage().set_descriptions(*descriptions)

@@ -218,38 +218,30 @@ def test_a_different_output_file_is_still_allowed(
 
 
 def test_a_failed_compress_leaves_the_existing_output_intact(
-    runner: CliRunner, tmp_path: Path
+    runner: CliRunner, gradient_bmp: Path, tmp_path: Path
 ) -> None:
-    """More blocks than the .cim header's uint16 count, so the write fails mid-header.
+    """A packed block size too large for its own `<H>` header field.
 
-    65536 single-pixel luma blocks overflow `<HHH`, and that raises after
-    `save()` has already opened the destination. Before the write was staged,
-    this replaced whatever was there with an 8-byte stub.
+    The point is a failure that happens *after* `save()` has opened the
+    destination, which is what the staged write in `_io` exists to survive.
+    This used the .cim block-count overflow until 0.4.6, when that moved to an
+    up-front check in `Task` and stopped reaching the writer at all -- the
+    assertion below caught that. If a future release validates the packed block
+    size up front too, this needs re-pointing at another post-open failure
+    rather than deleting.
     """
-    from conftest import gradient_pixels, write_bmp
-
-    source = write_bmp(tmp_path / "big.bmp", 256, 256, gradient_pixels(256, 256))
     output = tmp_path / "archive.cim"
     output.write_bytes(b"PREVIOUS ENCODE")
 
     result = runner.invoke(
         main,
-        [
-            "compress",
-            "--y-block-size",
-            "1",
-            "--packed-block-size",
-            "1",
-            str(source),
-            str(output),
-        ],
+        ["compress", "--packed-block-size", "70000", str(gradient_bmp), str(output)],
     )
 
     assert result.exit_code == 1, result.output
     # Not the full message: CPython words this differently per version, "'H'
     # format requires ... 65535" on 3.11+ and "ushort format requires ..." on
-    # 3.10. This much pins the failure to the struct pack, so the test still
-    # notices if the overflow starts being caught before the file is opened.
+    # 3.10. This much pins the failure to the struct pack in _write_header.
     assert "format requires" in result.output
     assert output.read_bytes() == b"PREVIOUS ENCODE"
     assert not [p for p in tmp_path.iterdir() if p.name.startswith(".walsh-")]
