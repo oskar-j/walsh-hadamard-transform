@@ -466,3 +466,46 @@ def test_every_shipped_encoder_configuration_still_loads(tmp_path: Path) -> None
         image = CustomizableImage.load(str(output))
         assert image.get_dimensions() == (width, height), kwargs
         assert len(image.get_y_data()) > 0, kwargs
+
+
+def test_get_stack_is_the_array_form_of_the_block_lists(tmp_path: Path) -> None:
+    """get_stack is what the codec consumes; get_*_data are views into it."""
+    description = BlockDescription(4, 2, 3)
+    image = CustomizableImage()
+    image.set_dimensions(12, 4)
+    image.set_descriptions(description, description, description)
+    blocks = [np.full((4, 4), value, dtype=float) for value in (1, -2, 3)]
+    image.set_data(blocks, blocks, blocks)
+    path = tmp_path / "s.cim"
+    image.save(str(path))
+
+    loaded = CustomizableImage.load(str(path))
+    stack = loaded.get_stack("y")
+    assert stack.shape == (3, 4, 4)
+    assert stack.flags.c_contiguous
+    for view, block in zip(loaded.get_y_data(), stack, strict=True):
+        assert np.shares_memory(view, stack)
+        np.testing.assert_array_equal(view, block)
+    assert loaded.get_stack("cb")[:, :2, :2].tolist() == [[[v] * 2] * 2 for v in (1, -2, 3)]
+    with pytest.raises(KeyError):
+        loaded.get_stack("alpha")
+
+
+def test_get_stack_of_an_empty_channel_has_zero_length() -> None:
+    image = CustomizableImage()
+    assert len(image.get_stack("y")) == 0
+    assert image.get_y_data() == []
+
+
+def test_set_data_accepts_a_stack_as_well_as_a_list(tmp_path: Path) -> None:
+    """Task hands over one (count, edge, edge) array; direct callers a list."""
+    description = BlockDescription(4, 2, 2)
+    stack = np.arange(2 * 4 * 4, dtype=float).reshape(2, 4, 4)
+    as_array, as_list = CustomizableImage(), CustomizableImage()
+    for image, data in ((as_array, stack), (as_list, list(stack))):
+        image.set_dimensions(8, 4)
+        image.set_descriptions(description, description, description)
+        image.set_data(data, data, data)
+        image.save(str(tmp_path / f"{id(image)}.cim"))
+    outputs = sorted(tmp_path.glob("*.cim"))
+    assert outputs[0].read_bytes() == outputs[1].read_bytes()

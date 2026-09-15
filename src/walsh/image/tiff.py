@@ -18,6 +18,8 @@ import logging
 import struct
 from typing import BinaryIO
 
+import numpy as np
+
 from walsh.exceptions import UnsupportedFileFormatError
 from walsh.image._io import FileSource, open_binary_read, open_binary_write
 from walsh.image.base import RasterImage
@@ -356,7 +358,7 @@ class TIFFImage(RasterImage):
             self._validate(entries)
             data = self._read_strips(file, entries)
 
-        self._raw_data = [(data[i], data[i + 1], data[i + 2]) for i in range(0, len(data), 3)]
+        self.set_array(np.frombuffer(data, dtype=np.uint8).reshape(self._height, self._width, 3))
         log.debug("loaded TIFF %dx%d from %s", self._width, self._height, filename)
 
     def save(self, filename: FileSource) -> None:
@@ -369,8 +371,7 @@ class TIFFImage(RasterImage):
             ValueError: If the pixel count does not match the dimensions.
             OSError: If the file cannot be written.
         """
-        self._check_complete()
-        body = bytes(channel for pixel in self._raw_data for channel in pixel)
+        body = self.get_array().tobytes()
 
         # Directory entries must be ordered by tag. The only value too large to
         # sit inside its entry is BitsPerSample, which follows the directory.

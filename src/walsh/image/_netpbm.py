@@ -8,14 +8,12 @@ encoding that raster live here so the two formats cannot drift apart.
 
 from __future__ import annotations
 
-import itertools
-from collections.abc import Sequence
 from typing import BinaryIO
 
 import numpy as np
 
 from walsh.exceptions import UnsupportedFileFormatError
-from walsh.image.base import Pixel
+from walsh.image.base import CHANNELS, PixelArray
 
 __all__ = ["NETPBM_MAX_SAMPLE", "encode_samples", "read_samples", "rescale_sample"]
 
@@ -45,12 +43,11 @@ def rescale_sample(value: int, maxval: int, what: str) -> int:
     return (value * NETPBM_MAX_SAMPLE + maxval // 2) // maxval
 
 
-def read_samples(file: BinaryIO, pixels: int, maxval: int, what: str) -> list[Pixel]:
+def read_samples(file: BinaryIO, pixels: int, maxval: int, what: str) -> PixelArray:
     """Read ``pixels`` RGB triples of one-byte samples, rescaled to 0..255.
 
-    The whole raster is decoded in a handful of array operations: one read,
-    one lookup-table pass when ``maxval`` is below 255, and one ``zip`` over
-    the three channel columns, which builds the tuples in C.
+    The whole raster is decoded in two array operations: one read, and one
+    lookup-table pass when ``maxval`` is below 255. Nothing per pixel.
 
     Args:
         file: Stream positioned at the first sample.
@@ -59,13 +56,13 @@ def read_samples(file: BinaryIO, pixels: int, maxval: int, what: str) -> list[Pi
         what: The format name, used only in error messages.
 
     Returns:
-        The pixels as integer triples, top row first.
+        The pixels as an ``(n, 3)`` ``uint8`` array, top row first.
 
     Raises:
         UnsupportedFileFormatError: If the data is shorter than promised, or a
             sample exceeds ``maxval``.
     """
-    expected = pixels * 3
+    expected = pixels * CHANNELS
     data = file.read(expected)
     if len(data) < expected:
         raise UnsupportedFileFormatError(
@@ -82,20 +79,16 @@ def read_samples(file: BinaryIO, pixels: int, maxval: int, what: str) -> list[Pi
         table = (np.arange(maxval + 1) * NETPBM_MAX_SAMPLE + maxval // 2) // maxval
         samples = table[samples].astype(np.uint8)
 
-    r, g, b = samples.reshape(-1, 3).T.tolist()
-    return list(zip(r, g, b, strict=True))
+    return samples.reshape(-1, CHANNELS)
 
 
-def encode_samples(pixels: Sequence[Pixel]) -> bytes:
-    """Serialise RGB triples as one byte per sample, in order.
-
-    ``bytes`` over a chained iterator consumes it in C, about twice as fast
-    as a generator expression over the same tuples.
+def encode_samples(pixels: PixelArray) -> bytes:
+    """Serialise a pixel array as one byte per sample, in order.
 
     Args:
-        pixels: The pixels, top row first.
+        pixels: The pixels as a ``uint8`` array, top row first.
 
     Returns:
-        ``3 * len(pixels)`` bytes.
+        ``3 * n`` bytes.
     """
-    return bytes(itertools.chain.from_iterable(pixels))
+    return np.ascontiguousarray(pixels).tobytes()

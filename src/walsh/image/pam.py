@@ -191,7 +191,8 @@ class PAMImage(RasterImage):
         """
         with open_binary_read(filename) as file:
             maxval = self._read_header(file)
-            self._raw_data = read_samples(file, self._width * self._height, maxval, "PAM")
+            samples = read_samples(file, self._width * self._height, maxval, "PAM")
+        self.set_array(samples.reshape(self._height, self._width, 3))
         log.debug("loaded PAM %dx%d from %s", self._width, self._height, filename)
 
     def save(self, filename: FileSource) -> None:
@@ -218,4 +219,4 @@ class PAMImage(RasterImage):
         )
         with open_binary_write(filename) as file:
             file.write(header)
-            file.write(encode_samples(self._raw_data))
+            file.write(encode_samples(self.get_array()))

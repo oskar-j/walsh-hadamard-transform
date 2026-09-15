@@ -104,7 +104,10 @@ more detail.
 Add a submodule under `src/walsh/image/` with a class subclassing
 `RasterImage`, implementing `load` and `save`, and add its filename suffix to
 `SUFFIXES` in `src/walsh/image/__init__.py`. Convert to and from the in-memory
-contract inside that class. Nothing in `Task` or the CLI needs to change.
+contract inside that class: decode with `np.frombuffer` and hand `set_array` a
+`(height, width, 3)` `uint8` array, and serialise from `get_array()`. Never
+build a list of tuples on the way — routing one through `np.asarray` is slower
+than per-pixel Python. Nothing in `Task` or the CLI needs to change.
 
 ## Releasing
 

@@ -35,6 +35,9 @@ COEFF_MAX = int(np.iinfo(COEFF_DTYPE).max)
 #: Channel keys, in the order they appear on disk.
 CHANNELS = ("y", "cb", "cr")
 
+#: What a channel holds before any blocks are set or read: a stack of none.
+_EMPTY_STACK: Block = np.empty((0, 0, 0), dtype=np.float64)
+
 
 def blocks_for(width: int, height: int, block_size: int) -> int:
     """Work out how many blocks a plane of this size is cut into.
@@ -88,7 +91,7 @@ class CustomizableImage:
         self._width = 0
         self._height = 0
         self._descriptions: dict[str, BlockDescription | None] = dict.fromkeys(CHANNELS)
-        self._data: dict[str, list[Block]] = {channel: [] for channel in CHANNELS}
+        self._data: dict[str, Block] = dict.fromkeys(CHANNELS, _EMPTY_STACK)
 
     @staticmethod
     def _read_exactly(file: BinaryIO, size: int, what: str) -> bytes:
@@ -198,7 +201,7 @@ class CustomizableImage:
                 )
 
     @staticmethod
-    def _read_blocks(file: BinaryIO, description: BlockDescription) -> list[Block]:
+    def _read_blocks(file: BinaryIO, description: BlockDescription) -> Block:
         """Read one channel's blocks, zero-padding each back to full size.
 
         Args:
@@ -207,10 +210,10 @@ class CustomizableImage:
                 by :meth:`_validate_header`.
 
         Returns:
-            One square array per block, of edge ``original_block_size``, with
-            the stored coefficients in the top-left corner and zeros elsewhere.
-            The blocks are views into one array, read and decoded in a single
-            step rather than one ``struct.unpack`` per block.
+            One ``(count, edge, edge)`` array with each block's stored
+            coefficients in its top-left corner and zeros elsewhere, read and
+            decoded in a single step rather than one ``struct.unpack`` per
+            block.
 
         Raises:
             UnsupportedFileFormatError: If the stream ends mid-block.
@@ -230,7 +233,7 @@ class CustomizableImage:
 
         blocks = np.zeros((count, original, original), dtype=np.float64)
         blocks[:, :packed, :packed] = coefficients.reshape(count, packed, packed)
-        return list(blocks)
+        return blocks
 
     @classmethod
     def load(cls, filename: FileSource) -> CustomizableImage:
@@ -257,29 +260,50 @@ class CustomizableImage:
                     image._data[channel] = cls._read_blocks(file, description)
         return image
 
-    def get_y_data(self) -> list[Block]:
-        """Return the luma blocks.
+    def get_stack(self, channel: str) -> Block:
+        """Return one channel's blocks as a single array.
+
+        This is what the codec consumes: the transform accepts a stack
+        directly, so no per-block object is made on the way in or out.
+
+        Args:
+            channel: ``"y"``, ``"cb"`` or ``"cr"``.
 
         Returns:
-            The Y channel's blocks, empty if the file carried none.
+            A ``(count, edge, edge)`` array, with ``count`` zero if the
+            channel carries no blocks.
+
+        Raises:
+            KeyError: If ``channel`` is not one of the three.
         """
-        return self._data["y"]
+        return self._data[channel]
+
+    def get_y_data(self) -> list[Block]:
+        """Return the luma blocks, one array each.
+
+        Returns:
+            The Y channel's blocks as views into one stack, empty if the file
+            carried none. :meth:`get_stack` is the array-shaped form.
+        """
+        return list(self._data["y"])
 
     def get_cb_data(self) -> list[Block]:
-        """Return the blue-difference chroma blocks.
+        """Return the blue-difference chroma blocks, one array each.
 
         Returns:
-            The Cb channel's blocks, empty if the file carried none.
+            The Cb channel's blocks as views into one stack, empty if the file
+            carried none. :meth:`get_stack` is the array-shaped form.
         """
-        return self._data["cb"]
+        return list(self._data["cb"])
 
     def get_cr_data(self) -> list[Block]:
-        """Return the red-difference chroma blocks.
+        """Return the red-difference chroma blocks, one array each.
 
         Returns:
-            The Cr channel's blocks, empty if the file carried none.
+            The Cr channel's blocks as views into one stack, empty if the file
+            carried none. :meth:`get_stack` is the array-shaped form.
         """
-        return self._data["cr"]
+        return list(self._data["cr"])
 
     def get_dimensions(self) -> tuple[int, int]:
         """Return the dimensions of the picture these blocks encode.
@@ -341,9 +365,9 @@ class CustomizableImage:
 
     def set_data(
         self,
-        y_data: Sequence[Block],
-        cb_data: Sequence[Block],
-        cr_data: Sequence[Block],
+        y_data: Block | Sequence[Block],
+        cb_data: Block | Sequence[Block],
+        cr_data: Block | Sequence[Block],
     ) -> None:
         """Store blocks, keeping only the low-frequency corner of each.
 
@@ -351,9 +375,12 @@ class CustomizableImage:
         cropped to ``packed_block_size`` squared coefficients.
 
         Args:
-            y_data: Transformed luma blocks.
-            cb_data: Transformed blue-difference chroma blocks.
-            cr_data: Transformed red-difference chroma blocks.
+            y_data: Transformed luma blocks, as one ``(count, edge, edge)``
+                stack or a sequence of blocks.
+            cb_data: Transformed blue-difference chroma blocks, as one ``(count, edge, edge)``
+                stack or a sequence of blocks.
+            cr_data: Transformed red-difference chroma blocks, as one ``(count, edge, edge)``
+                stack or a sequence of blocks.
 
         Raises:
             ValueError: If :meth:`set_descriptions` has not been called.
@@ -363,7 +390,10 @@ class CustomizableImage:
             if description is None:
                 raise ValueError("set_descriptions() must be called before set_data()")
             packed = description.packed_block_size
-            self._data[channel] = [block[:packed, :packed] for block in blocks]
+            # Crop every block to its kept corner. The crops are non-contiguous
+            # views, so they are stacked here, once, into what the writer needs.
+            cropped = [block[:packed, :packed] for block in blocks]
+            self._data[channel] = np.stack(cropped) if cropped else _EMPTY_STACK
 
     def _write_header(self, file: BinaryIO) -> None:
         """Write the dimensions and the three block descriptions.
@@ -381,23 +411,22 @@ class CustomizableImage:
             file.write(struct.pack(self.DESCRIPTION_FORMAT, *description))
 
     @staticmethod
-    def _write_blocks(file: BinaryIO, blocks: Sequence[Block]) -> None:
+    def _write_blocks(file: BinaryIO, blocks: Block) -> None:
         """Write one channel's blocks as little-endian ``int16``, in one write.
 
         Coefficients are rounded to nearest and clipped into the ``int16``
         range. Clipping cannot trigger for 8-bit input, where the largest
-        possible coefficient is well inside the range. The blocks are stacked
-        and encoded together, so a channel is one array operation and one
-        ``write`` rather than one of each per block.
+        possible coefficient is well inside the range. A channel is one array
+        operation and one ``write``.
 
         Args:
             file: Stream to write to.
-            blocks: The already-cropped blocks for one channel.
+            blocks: The channel's already-cropped blocks as one stack.
         """
-        if not blocks:
+        if len(blocks) == 0:
             return
-        data = np.clip(np.rint(np.stack(blocks)), COEFF_MIN, COEFF_MAX).astype(COEFF_DTYPE)
-        file.write(data.tobytes())
+        data = np.clip(np.rint(blocks), COEFF_MIN, COEFF_MAX).astype(COEFF_DTYPE)
+        file.write(np.ascontiguousarray(data).tobytes())
 
     def save(self, filename: FileSource) -> None:
         """Write this image to ``filename``.

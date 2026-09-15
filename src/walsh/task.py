@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import itertools
 import logging
 from collections.abc import Callable, Sequence
 from enum import Enum
@@ -18,7 +17,6 @@ from walsh.image import (
     BlockDescription,
     CustomizableImage,
     FileSource,
-    Pixel,
     blocks_for,
     reader_for,
 )
@@ -242,9 +240,7 @@ class Task:
                 f"Retry with {option} {sufficient} or larger, or scale the image down."
             )
 
-    def _slice(
-        self, values: npt.ArrayLike, width: int, height: int, block_size: int
-    ) -> list[Block]:
+    def _slice(self, values: npt.ArrayLike, width: int, height: int, block_size: int) -> Block:
         """Reshape a flat channel into square blocks, padding the edge outwards.
 
         Args:
@@ -254,12 +250,11 @@ class Task:
             block_size: Edge length of the blocks to cut.
 
         Returns:
-            The blocks in row-major order, each ``block_size`` square. The
-            image is first padded up to a whole number of blocks by
-            replicating its last row and column, so the fill carries no
-            content of its own; see the note in the body for why that matters.
-            The blocks are views into one contiguous array, cut by a single
-            reshape rather than a split per row and per block.
+            The blocks as one ``(count, block_size, block_size)`` array in
+            row-major order, cut by a single reshape. The image is first
+            padded up to a whole number of blocks by replicating its last row
+            and column, so the fill carries no content of its own; see the
+            note in the body for why that matters.
         """
         plane = np.asarray(values, dtype=np.float64).reshape(height, width)
 
@@ -289,16 +284,18 @@ class Task:
         blocks = grid.reshape(rows * columns, block_size, block_size)
 
         log.debug("produced %d block(s) of %s", len(blocks), blocks.shape[1:])
-        return list(blocks)
+        return blocks
 
     @staticmethod
-    def _merge(blocks: Sequence[Block], width: int, height: int) -> Block:
+    def _merge(blocks: Block | Sequence[Block], width: int, height: int) -> Block:
         """Reassemble blocks into a plane and crop the padding back off.
 
         The inverse of :meth:`_slice`.
 
         Args:
-            blocks: Blocks in the row-major order :meth:`_slice` produced.
+            blocks: The blocks in the row-major order :meth:`_slice` produced,
+                as one ``(count, edge, edge)`` array or a sequence of blocks.
+                An array passes through without a copy; a sequence is stacked.
             width: Width to crop back to.
             height: Height to crop back to.
 
@@ -310,7 +307,7 @@ class Task:
                 dimensions is cut into. The ``.cim`` reader guarantees this
                 for anything it accepts; the check is for direct callers.
         """
-        stacked = np.stack(blocks)
+        stacked = np.asarray(blocks, dtype=np.float64)
         _, block_height, block_width = stacked.shape
         blocks_per_row = (width - 1) // block_width + 1
         blocks_per_column = (height - 1) // block_height + 1
@@ -349,7 +346,7 @@ class Task:
 
         width, height = source_image.get_dimensions()
         self._check_fits_the_container(width, height)
-        ycbcr = rgb_to_ycbcr(_pixels_to_array(source_image.get_raw_data()))
+        ycbcr = rgb_to_ycbcr(source_image.get_array().reshape(-1, 3))
 
         blocks = {
             "y": self._slice(ycbcr[:, 0], width, height, self._y_block_size),
@@ -357,9 +354,11 @@ class Task:
             "cr": self._slice(ycbcr[:, 2], width, height, self._cr_block_size),
         }
 
+        # Each channel is one stack and the transform takes a stack as it is:
+        # no list of blocks is built, re-stacked or split anywhere in between.
         transform = WalshHadamardTransform(self._coeff_removal)
         spectral = {
-            channel: transform.transform_sequence(channel_blocks)
+            channel: transform.transform(channel_blocks)
             for channel, channel_blocks in blocks.items()
         }
 
@@ -391,27 +390,23 @@ class Task:
         width, height = customizable_image.get_dimensions()
         transform = WalshHadamardTransform()
 
-        channels = {
-            "y": (customizable_image.get_y_data(), NEUTRAL_LUMA),
-            "cb": (customizable_image.get_cb_data(), NEUTRAL_CHROMA),
-            "cr": (customizable_image.get_cr_data(), NEUTRAL_CHROMA),
-        }
+        neutral = {"y": NEUTRAL_LUMA, "cb": NEUTRAL_CHROMA, "cr": NEUTRAL_CHROMA}
 
         planes: dict[str, npt.NDArray[np.float64]] = {}
-        for channel, (spectral, neutral) in channels.items():
-            if not spectral:
-                log.debug("channel %s is empty, filling with %d", channel, neutral)
-                planes[channel] = np.full(width * height, float(neutral))
+        for channel, fill in neutral.items():
+            spectral = customizable_image.get_stack(channel)
+            if len(spectral) == 0:
+                log.debug("channel %s is empty, filling with %d", channel, fill)
+                planes[channel] = np.full(width * height, float(fill))
                 continue
-            merged = self._merge(transform.inverse_transform_sequence(spectral), width, height)
+            merged = self._merge(transform.inverse_transform(spectral), width, height)
             planes[channel] = merged.reshape(-1)
 
         ycbcr = np.stack([planes["y"], planes["cb"], planes["cr"]], axis=1)
-        pixels = _array_to_pixels(ycbcr_to_rgb(ycbcr))
+        pixels = ycbcr_to_rgb(ycbcr).reshape(height, width, 3)
 
         output_image = reader_for(self._output)
-        output_image.set_dimensions(width, height)
-        output_image.set_raw_data(pixels)
+        output_image.set_array(pixels)
         output_image.save(self._output)
 
     _ACTIONS: ClassVar[dict[Action, Callable[[Task], None]]] = {
@@ -438,39 +433,3 @@ class Task:
             self._coeff_removal,
         )
         Task._ACTIONS[self._action](self)
-
-
-def _pixels_to_array(pixels: Sequence[Pixel]) -> npt.NDArray[np.float64]:
-    """Turn a raster image's pixel list into an ``(n, 3)`` float array.
-
-    This is where the whole image crosses from Python objects into numpy.
-    ``np.asarray`` on a list of tuples inspects every element; feeding the
-    flattened samples to ``np.fromiter`` with a known count is about twice as
-    fast.
-
-    Args:
-        pixels: ``(r, g, b)`` triples, as :meth:`RasterImage.get_raw_data`
-            returns them.
-
-    Returns:
-        One row per pixel, in the same order.
-    """
-    samples = itertools.chain.from_iterable(pixels)
-    return np.fromiter(samples, dtype=np.float64, count=3 * len(pixels)).reshape(-1, 3)
-
-
-def _array_to_pixels(rgb: npt.NDArray[np.uint8]) -> list[Pixel]:
-    """Turn an ``(n, 3)`` array back into the raster contract's pixel list.
-
-    The mirror image of :func:`_pixels_to_array`. ``zip`` over the three
-    channel columns builds every tuple in C; mapping ``tuple`` over the rows
-    of ``tolist()`` is about twice as slow.
-
-    Args:
-        rgb: One ``(r, g, b)`` row per pixel.
-
-    Returns:
-        The pixels as integer triples, in the same order.
-    """
-    r, g, b = rgb.T.tolist()
-    return list(zip(r, g, b, strict=True))

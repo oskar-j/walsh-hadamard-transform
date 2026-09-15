@@ -9,6 +9,81 @@ The `## [x.y.z]` headings are load-bearing: the release workflow extracts the
 section matching the version in `pyproject.toml` and uses it as the GitHub
 Release notes.
 
+## [0.4.10]
+
+### Changed
+
+- **The raster contract is array-backed.** Closes #27, the last piece of the
+  0.4.0 vectorisation. `RasterImage` now holds its pixels as one `uint8`
+  array, and `get_array()` / `set_array()` are the primary accessors: a
+  `(height, width, 3)` RGB view of the image's own storage in, and out. Every
+  reader decodes straight into it and every writer serialises straight from
+  it, so no Python object per pixel is created anywhere between `load` and
+  `save`. `get_raw_data()` / `set_raw_data()` remain as converters, so every
+  existing caller keeps working.
+
+  Measured on a 2000x2000 image (12 MB of pixels), the same commands, before
+  and after:
+
+  | | wall time | peak RSS |
+  | --- | --- | --- |
+  | `walsh compress` | 3.18 s -> 0.98 s | 742 MB -> 492 MB |
+  | `walsh extract` | 2.33 s -> 1.00 s | 1035 MB -> 709 MB |
+
+  The pixel store itself goes from 291 MB as a list of tuples (72.7 bytes per
+  pixel) to 12 MB as an array. In the profile of one round trip, function
+  calls fall from 563,000 to 95,000 and the transform arithmetic is now the
+  largest single item, where before it was 8% behind pixel marshalling at
+  49%. What remains of the resident memory is the float64 working set of the
+  transform, a different matter from the raster contract.
+
+- **Block stacks flow through the pipeline as one array.** `Task._slice`
+  returns the `(count, edge, edge)` stack it always built instead of
+  splitting it into a list; `Task` calls the transform on the stack directly,
+  which it has accepted since 0.4.0; `_merge` passes an array through with
+  `np.asarray` rather than re-stacking it; and `CustomizableImage` holds each
+  channel as a stack, with a new `get_stack(channel)` accessor beside the
+  unchanged `get_y_data()` and friends, which now return views into it. The
+  crops `set_data` makes are stacked once there rather than in the writer.
+  `transform_sequence` / `inverse_transform_sequence` keep their documented
+  list return; `Task` simply no longer needs them.
+
+- The two remaining per-pixel decoders, BMP and TIFF, are vectorised: one
+  `np.frombuffer` and a reshape that drops the row padding, with BMP's
+  blue-green-red and bottom-up order handled by two reversed views. BMP's
+  writer is a pad and a `tobytes()`; TIFF's body is a `tobytes()`. The BMP
+  reader now sizes its read from the header through the bounded
+  `read_up_to`, like the `.cim` and `.npy` readers, and still reports the
+  first incomplete row.
+
+### Notes
+
+- **Codec output is byte-identical.** A new `tests/test_golden.py` pins it
+  for good: every `earth.*` container compresses to the checked-in
+  `transformed_earth.cim` (sha256 `29942c84...`), that file extracts to
+  every checked-in `recreated.*`, and the BMP sample round-trips to its
+  reconstruction. It was written and passing **before** the rewrite, then
+  re-run after it, and caught one real defect on the way: `set_array` first
+  assigned the dimensions directly and bypassed BMP's `set_dimensions`
+  override, which derives the two header size fields, so five header bytes
+  came out zero. It now goes through the method.
+- **One documented promise changed, deliberately.** `get_raw_data()` used to
+  return the live internal list, so mutating it mutated the image. It now
+  builds a fresh list per call, and its docstring says so; nothing in the
+  package, tests or example relied on the aliasing. `get_array()` is the live
+  view now.
+- **A trap for future readers, recorded in `CLAUDE.md`.** Routing a list of
+  tuples through `np.asarray` is slower than the old per-pixel code, not
+  faster. Any list-to-array hop must go through `itertools.chain` into
+  `np.fromiter` with an explicit count, which is what `set_raw_data` does.
+- `set_array` checks the dtype rather than casting it: a silent cast is how
+  a float or a 300 would become a wrong pixel with no error. It keeps a
+  reference to a contiguous `uint8` input rather than copying, and copies a
+  read-only buffer so `get_array` is always writable.
+- 370 to 391 tests, coverage 98.81% to 98.83%; `base.py`, `bmp.py`,
+  `npy.py`, `_netpbm.py` and `task.py` are at 100%. Run locally on 3.10
+  through 3.14.
+
 ## [0.4.9]
 
 ### Fixed
