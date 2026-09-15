@@ -85,8 +85,9 @@ SUFFIXES: dict[str, type[RasterImage]] = {
     ".tiff": TIFFImage,
 }
 
-#: Used when the format cannot be inferred, which keeps piping through stdin
-#: working as it did before PPM existed.
+#: Used when the format cannot be inferred: a path with no suffix, or ``None``
+#: for stdin. BMP because it was the only format before 0.2.0, so this is what
+#: any caller from then still expects.
 DEFAULT_RASTER: type[RasterImage] = BMPImage
 
 

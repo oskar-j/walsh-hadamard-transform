@@ -9,6 +9,76 @@ The `## [x.y.z]` headings are load-bearing: the release workflow extracts the
 section matching the version in `pyproject.toml` and uses it as the GitHub
 Release notes.
 
+## [0.4.9]
+
+### Fixed
+
+Two documentation issues, both closed. Closes #28 and #29. No code path
+changes, so codec output is byte-identical.
+
+- **The three `--help` screens no longer print the docstrings' `Args:` and
+  `Raises:` sections** (#28). Click reflowed them into one unreadable run,
+  complete with RST double-backticks and the internal `click.ClickException`
+  class name. A form feed in each docstring now marks where the help stops;
+  the Google sections stay in the source verbatim, for readers of it. The
+  docstrings must remain plain strings: click splits on the form-feed
+  *character*, and a raw string prints a literal `\f` instead (verified on
+  click 8.4). A test asserts each screen is free of all four leaks and still
+  carries its summary.
+
+- **`--coeff-removal` is described as what it does** (#28). The help said
+  "Zero Hadamard matrix entries at or below this threshold", which is the
+  0.2.1 bug restated as documentation: the option thresholds *spectral
+  coefficients*, strictly below the value, and never touches the matrix. The
+  wording was harmful, not just stale. Every entry of the orthonormal matrix
+  shares one magnitude, 0.354 at block 8, so a user who read the help and
+  picked a value at that scale got a byte-identical file -- `--coeff-removal
+  0.35` and no threshold produce the same `.cim`. `Task.with_coeff_removal`
+  said the same thing and added "during construction"; both now describe the
+  comparison, that it is strict, that only `compress` applies it, and that a
+  negative value is rejected at `run()`. The README repoints "the full list"
+  from `walsh -h`, which lists only `-v` and `--version`, to `walsh compress
+  -h`.
+
+- **The threshold's dependence on block size is documented** (#28). It is
+  an absolute magnitude, and the README's tuning table was measured at the
+  default 8/16 blocks only. Re-measured for this release: the same
+  `--coeff-removal 25` zeroes 79.3% of coefficients at block 8 but 51.0% at
+  block 64, so a value tuned against the table and then combined with a
+  larger `--y-block-size` quietly stops doing most of its work. The README
+  now carries that table, and `WalshHadamardTransform.__init__` and the CLI
+  help say to retune with the block size. A normalised threshold would be the
+  cleaner design and is deliberately not done: it would change output bytes
+  for every existing `--coeff-removal` invocation.
+
+- **`UnsupportedFileFormatError` is documented for every format** (#29). Its
+  docstring, unchanged since the original port, said "Raised for BMP files
+  that are not 24-bit, single-plane, uncompressed". It is raised from 61
+  sites across nine modules and is exported from `walsh`, so that sentence
+  was what `help()` showed for a public symbol. It now says what it covers.
+
+- **The stdin "shell pipeline" claims are corrected** (#29). Two comments
+  advertised piping through the codec. It is not reachable from the CLI,
+  whose arguments are paths, and it is not a pipeline even from the library:
+  BMP, TIFF and ASCII PPM seek while parsing, so a real pipe fails with
+  `io.UnsupportedOperation` for them; only a `< file` redirect, which is
+  seekable, works. Binary PPM, PAM, `.npy` and `.cim` read forward only. The
+  `FileSource` and `DEFAULT_RASTER` comments and every reader's `load`
+  docstring now say which. A new `tests/test_streams.py` feeds each reader a
+  genuinely non-seekable stream and pins that table, which the existing stdin
+  test could not, since it substitutes a seekable `io.BytesIO`. Deliberately
+  **not** fixed by `allow_dash=True`, which would ship a `-` that dies on
+  every real pipe; real pipe support means buffering stdin and is a feature
+  decision.
+
+- `CLAUDE.md` said `image.py` re-exports the error; it has been the `image/`
+  package since 0.2.0.
+
+### Notes
+
+- 357 to 370 tests. The five new help and docstring assertions fail against
+  the old text, checked. Coverage unchanged at 98.81%.
+
 ## [0.4.8]
 
 ### Added

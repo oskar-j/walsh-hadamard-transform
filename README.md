@@ -99,7 +99,7 @@ walsh extract  out.cim restored.npy     # or a bare NumPy array
 `compress` accepts `--packed-block-size` (how many low-frequency coefficients
 per axis to keep -- lower is smaller and lossier), `--y-block-size`,
 `--chroma-block-size` and `--coeff-removal`. Add `-v`/`-vv` for progress
-logging, and see `walsh -h` for the full list.
+logging, and see `walsh compress -h` for the full list.
 
 Writes are atomic: output goes to a temporary file beside the destination and
 replaces it only on success, so a failed run leaves an existing file untouched.
@@ -124,6 +124,25 @@ or not they are zero, but it makes the result far more compressible. On
 | 5 | 29,049 | 45,080 B | 25.06 dB |
 | 25 | 14,769 | 27,924 B | 24.71 dB |
 | 50 | 8,917 | 19,285 B | 23.85 dB |
+
+That table was measured at the default block sizes, 8 for luma and 16 for
+chroma, and the threshold is an **absolute** magnitude, so its effect depends
+on them. The surviving low-frequency coefficients grow with the block edge,
+and the same number prunes less at a larger one. The same `--coeff-removal
+25` on `data/earth.ppm`, with luma and chroma blocks set equal:
+
+| block edge | non-zero coefficients | zeroed | gzipped `.cim` |
+| --- | --- | --- | --- |
+| 8 | 88,277 → 18,292 | 79.3% | 94,658 → 32,235 B |
+| 16 | 24,060 → 7,041 | 70.7% | 29,190 → 13,105 B |
+| 32 | 6,921 → 2,617 | 62.2% | 9,435 → 5,192 B |
+| 64 | 2,134 → 1,045 | 51.0% | 3,048 → 2,147 B |
+
+A threshold tuned against the first table and then combined with a larger
+`--y-block-size` has quietly stopped doing most of its work; retune it. Note
+also that it thresholds *spectral coefficients*, never the Hadamard matrix,
+whose entries all share one magnitude (0.35 at edge 8): a value at that scale
+is a no-op.
 
 ### Reading the PSNR figures
 

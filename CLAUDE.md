@@ -214,7 +214,7 @@ arguments, falling back to `repr()` for unhashable ones (which
 **`exceptions.py`** — `WalshError` (base), `UnsupportedFileFormatError`, and
 `EXPECTED_ERRORS`, the tuple the CLI converts into a clean `ClickException`.
 It must keep importing nothing from the rest of the package, so every module can
-use it without a cycle; `image.py` re-exports `UnsupportedFileFormatError` for
+use it without a cycle; `image/__init__.py` re-exports `UnsupportedFileFormatError` for
 back-compat. `EXPECTED_ERRORS` lists `struct.error` explicitly because that
 derives from `Exception`, not `ValueError` — dropping it reintroduces a
 traceback on truncated input.

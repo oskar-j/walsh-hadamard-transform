@@ -150,7 +150,9 @@ class BMPImage(RasterImage):
         """Read a BMP from ``filename``, replacing any current contents.
 
         Args:
-            filename: Path to read, or ``None`` to read from stdin.
+            filename: Path to read, or ``None`` to read from ``sys.stdin``,
+                which must be seekable: this reader seeks while parsing, so a
+                pipe raises ``io.UnsupportedOperation``.
 
         Raises:
             UnsupportedFileFormatError: If the data is not a supported BMP.

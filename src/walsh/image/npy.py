@@ -175,7 +175,8 @@ class NPYImage(RasterImage):
         """Read a ``.npy`` from ``filename``, replacing any current contents.
 
         Args:
-            filename: Path to read, or ``None`` to read from stdin.
+            filename: Path to read, or ``None`` to read from ``sys.stdin``.
+                Reads forward only, so a pipe works.
 
         Raises:
             UnsupportedFileFormatError: If the file is not a ``.npy``, its

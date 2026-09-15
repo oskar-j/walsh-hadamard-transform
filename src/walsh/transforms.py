@@ -132,7 +132,11 @@ class WalshHadamardTransform(Transform):
 
         Args:
             coeff: Optional coefficient-removal threshold, as an absolute
-                magnitude. ``None``, the default, keeps every coefficient.
+                magnitude: a spectral coefficient strictly below it is zeroed.
+                ``None``, the default, keeps every coefficient. Because it is
+                absolute and the surviving low-frequency coefficients grow with
+                the block edge, one value prunes less at a larger block size;
+                tune it for the block size in use.
 
         Raises:
             ValueError: If ``coeff`` is negative. It is compared against a

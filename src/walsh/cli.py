@@ -80,6 +80,12 @@ def _run(task: Task) -> None:
 @click.version_option(package_name="walsh", prog_name="walsh")
 def main(verbose: int) -> None:
     """Compress and restore images with the Walsh-Hadamard transform.
+    \f
+    The form feed above is where click stops printing this docstring in
+    ``--help``. The Google sections are for readers of the source; reflowed
+    into a help screen they came out as one unreadable run, backticks and all.
+    The same marker sits in ``compress`` and ``extract``. These docstrings must
+    not become raw strings: click splits on the form-feed *character*.
 
     Args:
         verbose: How many times ``-v`` was given. One enables info logging,
@@ -117,7 +123,11 @@ def main(verbose: int) -> None:
     "--coeff-removal",
     type=float,
     default=None,
-    help="Zero Hadamard matrix entries at or below this threshold.",
+    help=(
+        "Zero spectral coefficients whose magnitude is strictly below this "
+        "threshold. Absolute, so scale it with the block size: a value tuned at "
+        "the default 8-pixel luma block prunes far less at a larger one."
+    ),
 )
 def compress(
     input_path: str,
@@ -131,7 +141,7 @@ def compress(
 
     The input format is taken from the filename suffix: .bmp, .ppm, .pnm,
     .pam, .tif, .tiff, or .npy for a bare NumPy array.
-
+    \f
     Args:
         input_path: Image to read.
         output_path: Path of the .cim file to write.
@@ -167,7 +177,7 @@ def extract(input_path: str, output_path: str) -> None:
 
     The output format is taken from the filename suffix, so a picture
     compressed from a BMP can be written back out as a PPM.
-
+    \f
     Args:
         input_path: The .cim file to read.
         output_path: Image to write, ending .bmp, .ppm, .pnm, .pam, .tif,
