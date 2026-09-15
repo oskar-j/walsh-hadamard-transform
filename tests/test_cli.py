@@ -263,3 +263,62 @@ def test_a_failed_extract_leaves_the_existing_output_intact(
 
     assert result.exit_code == 1, result.output
     assert output.read_bytes() == before
+
+
+# -- a .cim that is not one, or lies about itself, must fail cleanly ------
+
+
+@pytest.mark.parametrize(
+    ("name", "data"),
+    [
+        (
+            "allocation bomb",
+            b"\x08\x00\x00\x00\x08\x00\x00\x00\xff\xff\x00\x00\xff\xff"
+            + b"\x10\x00\x04\x00\x00\x00" * 2,
+        ),
+        ("zero width", b"\x00\x00\x00\x00\x10\x00\x00\x00" + b"\x08\x00\x04\x00\x00\x00" * 3),
+        ("zero height", b"\x10\x00\x00\x00\x00\x00\x00\x00" + b"\x08\x00\x04\x00\x00\x00" * 3),
+        ("packed size 0", b"\x10\x00\x00\x00\x10\x00\x00\x00" + b"\x08\x00\x00\x00\x04\x00" * 3),
+    ],
+)
+def test_malformed_cim_geometry_is_a_clean_error(
+    runner: CliRunner, tmp_path: Path, name: str, data: bytes
+) -> None:
+    """Each of these used to be a bare traceback (MemoryError, ZeroDivisionError)
+    or, worse, exit 0 with a corrupt image. Under CliRunner an uncaught
+    exception lands in result.exception and is not printed, so assert on the
+    exit code and the Error: line rather than on the absence of a traceback.
+    """
+    path = tmp_path / "bad.cim"
+    path.write_bytes(data)
+
+    result = runner.invoke(main, ["extract", str(path), str(tmp_path / "out.bmp")])
+
+    assert result.exit_code == 1, (name, result.output, result.exception)
+    assert "Error: invalid .cim" in result.output, (name, result.output)
+    assert not (tmp_path / "out.bmp").exists()
+
+
+def test_a_raster_image_given_to_extract_fails_fast(
+    runner: CliRunner, sample_bmp: Path, tmp_path: Path
+) -> None:
+    """The ordinary argument mix-up. It used to run for a minute and try to
+    allocate 78 GB before blaming a block size."""
+    result = runner.invoke(main, ["extract", str(sample_bmp), str(tmp_path / "out.bmp")])
+    assert result.exit_code == 1, result.output
+    assert "Error: invalid .cim" in result.output
+
+
+@pytest.mark.parametrize("option", ["--packed-block-size", "--y-block-size", "--chroma-block-size"])
+@pytest.mark.parametrize("value", ["0", "-4"])
+def test_block_sizes_below_one_are_refused_before_any_work(
+    runner: CliRunner, gradient_bmp: Path, tmp_path: Path, option: str, value: str
+) -> None:
+    """--packed-block-size 0 used to encode a header-only file that decoded to
+    solid green; a negative value failed by accident inside struct.pack."""
+    result = runner.invoke(
+        main, ["compress", option, value, str(gradient_bmp), str(tmp_path / "o.cim")]
+    )
+    assert result.exit_code == 2, result.output
+    assert "Invalid value" in result.output
+    assert not (tmp_path / "o.cim").exists()

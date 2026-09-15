@@ -184,8 +184,10 @@ def test_bmp_rejects_truncated_pixel_data(tmp_path: Path) -> None:
         ("three bytes", b"\x01\x02\x03", "truncated .cim header"),
         ("header only", b"\x00" * 8, "truncated .cim y block description"),
         (
+            # 40x8 in 8-blocks is 5 blocks, so the count is right and only the
+            # data is missing; 16x16 would now be caught as a geometry mismatch.
             "declares blocks it does not have",
-            struct.pack("<II", 16, 16) + struct.pack("<HHH", 8, 4, 5) * 3,
+            struct.pack("<II", 40, 8) + struct.pack("<HHH", 8, 4, 5) * 3,
             "truncated .cim block 0",
         ),
         (
@@ -197,6 +199,50 @@ def test_bmp_rejects_truncated_pixel_data(tmp_path: Path) -> None:
             "packed size exceeds block size",
             struct.pack("<II", 8, 8) + struct.pack("<HHH", 4, 8, 1) * 3 + b"\x00" * 128,
             "packed size 8 exceeds block size 4",
+        ),
+        # -- header geometry, 0.4.7 (#22): rejected before anything allocates --
+        (
+            "zero width",
+            struct.pack("<II", 0, 16) + struct.pack("<HHH", 8, 4, 0) * 3,
+            "dimensions must be positive, got 0x16",
+        ),
+        (
+            "zero height",
+            struct.pack("<II", 16, 0) + struct.pack("<HHH", 8, 4, 0) * 3,
+            "dimensions must be positive, got 16x0",
+        ),
+        (
+            "block size 0",
+            struct.pack("<II", 8, 8) + struct.pack("<HHH", 0, 0, 0) * 3,
+            "y block description: block size 0 is not a positive power of two",
+        ),
+        (
+            "block size not a power of two",
+            struct.pack("<II", 8, 8) + struct.pack("<HHH", 6, 4, 4) * 3,
+            "block size 6 is not a positive power of two",
+        ),
+        (
+            "packed size 0",
+            struct.pack("<II", 16, 16) + struct.pack("<HHH", 8, 0, 4) * 3,
+            "packed size must be at least 1, got 0",
+        ),
+        (
+            "too few blocks for the dimensions",
+            struct.pack("<II", 16, 16) + struct.pack("<HHH", 8, 4, 1) * 3 + b"\x00" * 96,
+            "y block description: 1 blocks declared, but a 16x16 image in 8-pixel blocks has 4",
+        ),
+        (
+            "too many blocks for the dimensions",
+            struct.pack("<II", 16, 16) + struct.pack("<HHH", 8, 4, 5) * 3 + b"\x00" * 480,
+            "5 blocks declared, but a 16x16 image in 8-pixel blocks has 4",
+        ),
+        (
+            # The bomb from #22: 65535 blocks of 65535x65535 would be 2 PiB.
+            "a 26-byte allocation bomb",
+            struct.pack("<II", 8, 8)
+            + struct.pack("<HHH", 65535, 0, 65535)
+            + struct.pack("<HHH", 16, 4, 0) * 2,
+            "block size 65535 is not a positive power of two",
         ),
     ],
 )
@@ -221,10 +267,14 @@ def test_cim_declaring_no_blocks_is_valid(tmp_path: Path) -> None:
 
 
 def test_truncation_names_the_first_incomplete_block(tmp_path: Path) -> None:
-    """Three 2x2 blocks declared, one and a half present: block 1 is the short one."""
+    """Three 2x2 blocks declared, one and a half present: block 1 is the short one.
+
+    6x2 in 2-blocks is exactly three blocks, so the header is consistent and
+    the failure is the missing data, not the geometry.
+    """
     description = struct.pack("<HHH", 2, 2, 3)
     path = tmp_path / "short.cim"
-    path.write_bytes(struct.pack("<II", 4, 2) + description * 3 + b"\x00" * 12)
+    path.write_bytes(struct.pack("<II", 6, 2) + description * 3 + b"\x00" * 12)
 
     with pytest.raises(UnsupportedFileFormatError, match=r"block 1: expected 8 bytes, got 4"):
         CustomizableImage.load(str(path))
@@ -368,3 +418,51 @@ def test_set_descriptions_rejects_a_block_count_the_field_cannot_hold() -> None:
         descriptions[position] = too_many
         with pytest.raises(ValueError, match="16-bit field"):
             CustomizableImage().set_descriptions(*descriptions)
+
+
+def test_a_raster_image_fed_to_the_cim_reader_is_refused_cheaply(sample_bmp: Path) -> None:
+    """The repository's own BMP parses as a 1396067650x7 image with a 0-pixel
+    block size. Before 0.4.7 that meant a 78 GB allocation and a minute of
+    work before failing; now the header alone is enough to say no."""
+    with pytest.raises(UnsupportedFileFormatError, match="not a positive power of two"):
+        CustomizableImage.load(str(sample_bmp))
+
+
+def test_the_cim_reader_never_asks_for_the_declared_size_at_once(tmp_path: Path) -> None:
+    """A consistent header can still declare far more data than the file holds.
+
+    file.read(n) allocates n bytes before reading, so the old reader asked the
+    stream for the whole declared total. This header is consistent (4 blocks of
+    8 for 16x16) with packed 8, so it declares 512 bytes and the file has 4;
+    the point is that the shortfall is reported per block, from a bounded read.
+    """
+    path = tmp_path / "short.cim"
+    path.write_bytes(struct.pack("<II", 16, 16) + struct.pack("<HHH", 8, 8, 4) * 3 + b"\x00" * 4)
+    with pytest.raises(UnsupportedFileFormatError, match=r"block 0: expected 128 bytes, got 4"):
+        CustomizableImage.load(str(path))
+
+
+def test_every_shipped_encoder_configuration_still_loads(tmp_path: Path) -> None:
+    """The consistency rules are exact, so they must accept everything the
+    encoder can produce: padded dimensions, every packed size, and odd block
+    combinations, not just the defaults."""
+    from conftest import gradient_pixels, write_ppm
+    from walsh.task import Task
+
+    width, height = 13, 7  # a multiple of neither block size
+    source = write_ppm(tmp_path / "odd.ppm", width, height, gradient_pixels(width, height))
+    configurations = [
+        {},
+        {"packed_block_size": 2},
+        {"packed_block_size": 1},
+        {"y_block_size": 16, "cb_block_size": 4, "cr_block_size": 4, "packed_block_size": 3},
+        {"y_block_size": 32, "cb_block_size": 32, "packed_block_size": 4},
+    ]
+    for index, kwargs in enumerate(configurations):
+        output = tmp_path / f"{index}.cim"
+        Task(**kwargs).with_action("compress").with_input(str(source)).with_output(
+            str(output)
+        ).run()
+        image = CustomizableImage.load(str(output))
+        assert image.get_dimensions() == (width, height), kwargs
+        assert len(image.get_y_data()) > 0, kwargs

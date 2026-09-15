@@ -94,21 +94,21 @@ def main(verbose: int) -> None:
 @click.argument("output_path", metavar="OUTPUT", type=_OUTPUT_FILE)
 @click.option(
     "--y-block-size",
-    type=int,
+    type=click.IntRange(min=1),
     default=DEFAULT_Y_BLOCK_SIZE,
     show_default=True,
     help="Luma block edge.",
 )
 @click.option(
     "--chroma-block-size",
-    type=int,
+    type=click.IntRange(min=1),
     default=DEFAULT_CHROMA_BLOCK_SIZE,
     show_default=True,
     help="Cb/Cr block edge.",
 )
 @click.option(
     "--packed-block-size",
-    type=int,
+    type=click.IntRange(min=1),
     default=DEFAULT_PACKED_BLOCK_SIZE,
     show_default=True,
     help="Coefficients kept per axis. Lower means smaller and lossier.",

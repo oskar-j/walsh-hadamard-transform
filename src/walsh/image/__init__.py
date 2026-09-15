@@ -27,6 +27,7 @@ from walsh.image.cim import (
     MAX_BLOCKS_PER_CHANNEL,
     BlockDescription,
     CustomizableImage,
+    blocks_for,
 )
 from walsh.image.pam import PAM_DEPTH, PAM_MAGIC, PAM_TUPLTYPE, PAMImage
 from walsh.image.ppm import PPM_ASCII_MAGIC, PPM_BINARY_MAGIC, PPM_MAX_SAMPLE, PPMImage
@@ -60,6 +61,7 @@ __all__ = [
     "TIFFImage",
     "UnsupportedFileFormatError",
     "align",
+    "blocks_for",
     "open_binary",
     "open_binary_read",
     "open_binary_write",

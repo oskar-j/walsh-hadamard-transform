@@ -19,6 +19,7 @@ from walsh.image import (
     CustomizableImage,
     FileSource,
     Pixel,
+    blocks_for,
     reader_for,
 )
 from walsh.transforms import WalshHadamardTransform
@@ -176,8 +177,11 @@ class Task:
 
         Returns:
             The block count, row-major blocks per row times blocks per column.
+            Delegates to :func:`walsh.image.blocks_for`, which the ``.cim``
+            reader also uses to check a header, so encoder and reader cannot
+            disagree about it.
         """
-        return ((width - 1) // block_size + 1) * ((height - 1) // block_size + 1)
+        return blocks_for(width, height, block_size)
 
     def _check_fits_the_container(self, width: int, height: int) -> None:
         """Reject an image with more blocks than ``.cim`` can count.
@@ -292,16 +296,25 @@ class Task:
 
         Returns:
             The reassembled plane, of shape ``(height, width)``.
+
+        Raises:
+            ValueError: If the number of blocks is not what a plane of these
+                dimensions is cut into. The ``.cim`` reader guarantees this
+                for anything it accepts; the check is for direct callers.
         """
         stacked = np.stack(blocks)
         _, block_height, block_width = stacked.shape
         blocks_per_row = (width - 1) // block_width + 1
-        blocks_per_column = len(blocks) // blocks_per_row
+        blocks_per_column = (height - 1) // block_height + 1
+        if len(blocks) != blocks_per_row * blocks_per_column:
+            raise ValueError(
+                f"{len(blocks)} blocks cannot tile a {width}x{height} plane in "
+                f"{block_height}x{block_width} blocks, which takes "
+                f"{blocks_per_row * blocks_per_column}"
+            )
         # The inverse of the reshape in _slice: lay the blocks out on their
         # grid, then interleave the block index with the offset within it.
-        grid = stacked[: blocks_per_column * blocks_per_row].reshape(
-            blocks_per_column, blocks_per_row, block_height, block_width
-        )
+        grid = stacked.reshape(blocks_per_column, blocks_per_row, block_height, block_width)
         plane = grid.swapaxes(1, 2).reshape(
             blocks_per_column * block_height, blocks_per_row * block_width
         )

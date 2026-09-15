@@ -9,6 +9,87 @@ The `## [x.y.z]` headings are load-bearing: the release workflow extracts the
 section matching the version in `pyproject.toml` and uses it as the GitHub
 Release notes.
 
+## [0.4.7]
+
+### Fixed
+
+- **A `.cim` header is checked for self-consistency before anything is
+  allocated from it.** Closes #22.
+
+  The container has no signature, so any 26 bytes parse as a header, and every
+  consumer downstream allocated, divided and reshaped on the raw fields.
+  `walsh extract data/image.bmp out.bmp`, an ordinary argument mix-up on the
+  repository's own sample, decoded the BMP as a 1396067650x7 image, ran for
+  62 seconds behind a 78 GB allocation, and then blamed a block size. A
+  crafted 26-byte file asked for 2 PiB and died with a bare `MemoryError`
+  traceback. A zero width was a bare `ZeroDivisionError`; a zero height exited
+  0 and wrote a 12-byte stub; and `--packed-block-size 0` encoded a header-only
+  file that decoded, exit 0, to solid green.
+
+  `_read_header` now validates the geometry it just read, after all three
+  block descriptions so a file cut short in the header is still reported as
+  truncated: both dimensions positive; per channel, the block size a positive
+  power of two (the transform requires it anyway), the packed size between 1
+  and the block size, and the block count either 0 -- the "empty channel"
+  state `extract` fills with a neutral -- or exactly what a plane of those
+  dimensions is cut into. That last rule is exact, not a heuristic: the
+  encoder pads to a block multiple, so a valid file always carries precisely
+  that many. Every rejection names the channel and the field:
+
+  ```
+  Error: invalid .cim y block description: block size 0 is not a positive power of two
+  Error: invalid .cim header: dimensions must be positive, got 16x0
+  Error: invalid .cim y block description: 4 blocks declared, but a 16x64 image in 8-pixel blocks has 16
+  ```
+
+  The BMP-as-`.cim` case now fails in 0.2 seconds at baseline memory. The
+  blocks-in-a-plane arithmetic moved to `walsh.image.blocks_for`, which both
+  `Task` and the reader use, so encoder and reader cannot disagree about it.
+
+- **The reader no longer asks the stream for the declared coefficient total
+  in one call.** `file.read(n)` allocates `n` bytes before reading, so a
+  header declaring terabytes exhausted memory before the first byte arrived,
+  even when the header was otherwise plausible. Coefficients are now read in
+  bounded chunks and cost only what the file holds; a short file still
+  reports the first incomplete block as before.
+
+- **`Task._merge` takes its row count from the declared height**, not from
+  the number of blocks it was handed. It used to drop surplus blocks silently
+  and fail a shortfall with a numpy reshape error naming no dimension. It now
+  raises `ValueError` naming the plane, the block and the count it needed.
+  For any file the reader accepts this is unreachable; it is for direct
+  callers.
+
+- **`--packed-block-size`, `--y-block-size` and `--chroma-block-size` refuse
+  values below 1 before any work is done** (`click.IntRange(min=1)`, exit
+  code 2). Zero produced the solid-green file above; a negative value failed
+  by accident inside `struct.pack` with a message naming neither the option
+  nor the limit.
+
+### Notes
+
+- **Codec output and the container format are unchanged.** This is read-side
+  validation only: no byte of the format moves, deliberately not a magic
+  number, which would shift every offset and invalidate every existing file.
+  All five checked-in sample outputs reproduce byte for byte; PPM, PAM and
+  TIFF sources still agree; `data/transformed_earth.cim` still decodes to
+  `data/recreated.ppm` exactly; and a test round-trips five encoder
+  configurations, including a 13x7 image and `--packed-block-size 3`, through
+  the hardened reader.
+- `MemoryError` was deliberately **not** added to `EXPECTED_ERRORS`. Its
+  message is empty, so the CLI would print a bare `Error:`, and it would
+  relabel a genuine out-of-memory on a legitimately large image as malformed
+  input. The allocations are bounded instead.
+- Two test fixtures encoded geometrically impossible headers and were
+  corrected (16x16 with 5 blocks of 8 became 40x8; 4x2 with 3 blocks of 2
+  became 6x2), each keeping the truncation message it was pinning.
+- One bound remains open by design: a header that is self-consistent but
+  describes an enormous image still allocates in proportion to that image,
+  as any decoder must. A block-size ceiling shared by encoder and reader would
+  close it and belongs with #21, since both sides have to agree on it.
+- 296 to 320 tests, 21 of the new assertions fail against the unfixed code.
+  Coverage 98.68% to 98.72%; `cli.py` and `task.py` at 100%.
+
 ## [0.4.6]
 
 ### Fixed

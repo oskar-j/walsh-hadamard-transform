@@ -440,3 +440,20 @@ def test_the_same_image_compresses_with_a_larger_block(tmp_path: Path) -> None:
     ).with_output(str(output)).run()
 
     assert output.stat().st_size > 0
+
+
+def test_merge_rejects_a_block_count_that_cannot_tile_the_plane() -> None:
+    """Before 0.4.7 a surplus was dropped silently and a shortfall raised a
+    numpy reshape error naming no dimension. The reader now guarantees the
+    count for any file it accepts; this covers direct callers."""
+    blocks = [np.full((4, 4), i, dtype=float) for i in range(3)]  # 6x6 needs 4
+    with pytest.raises(ValueError, match="3 blocks cannot tile a 6x6 plane"):
+        Task._merge(blocks, width=6, height=6)
+
+
+def test_merge_takes_its_row_count_from_the_height_not_the_block_count() -> None:
+    """A 6x6 plane in 4-blocks is 2x2 blocks; all four must be placed."""
+    blocks = [np.full((4, 4), i, dtype=float) for i in range(4)]
+    merged = Task._merge(blocks, width=6, height=6)
+    assert merged.shape == (6, 6)
+    assert merged[0, 0] == 0 and merged[0, 5] == 1 and merged[5, 0] == 2 and merged[5, 5] == 3
