@@ -4,6 +4,7 @@ import struct
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pytest
 
 from walsh.image import BMP_HEADER_FORMAT, BMP_PIXEL_OFFSET, BMP_SIGNATURE, align
@@ -252,6 +253,47 @@ def write_pam(
     return path
 
 
+def write_npy(
+    path: Path,
+    width: int,
+    height: int,
+    pixels: list[Pixel],
+    *,
+    channels: int | None = 3,
+    dtype: str = "uint8",
+    alpha: int = 255,
+    fortran_order: bool = False,
+) -> Path:
+    """Write a `.npy` from RGB pixels given top row first.
+
+    With the defaults this is exactly what `np.save` writes for an
+    `(height, width, 3)` `uint8` array, so a file this package writes should
+    match it byte for byte. The keywords produce the off-profile shapes the
+    reader must handle or refuse: `channels=None` for a 2-D greyscale array,
+    `1` for `(h, w, 1)`, `4` to append an `alpha` plane, any `dtype` numpy
+    knows, and Fortran memory order. Greyscale takes the red channel.
+    """
+    rgb = np.asarray(pixels, dtype=np.uint8).reshape(height, width, 3)
+    if channels is None:
+        array = rgb[:, :, 0]
+    elif channels == 1:
+        array = rgb[:, :, :1]
+    elif channels == 4:
+        array = np.concatenate([rgb, np.full((height, width, 1), alpha, dtype=np.uint8)], axis=2)
+    else:
+        array = (
+            rgb[:, :, :channels]
+            if channels <= 3
+            else np.repeat(rgb, channels, axis=2)[:, :, :channels]
+        )
+    array = array.astype(dtype)
+    if fortran_order:
+        array = np.asfortranarray(array)
+    with path.open("wb") as file:
+        np.save(file, array, allow_pickle=False)
+    return path
+
+
 def gradient_pixels(width: int, height: int) -> list[Pixel]:
     """A smooth gradient, which the low-frequency codec reproduces well."""
     return [
@@ -285,6 +327,19 @@ def gradient_pam(tmp_path: Path) -> Path:
     """The same gradient as `gradient_bmp`, as an RGB PAM."""
     width = height = 16
     return write_pam(tmp_path / "gradient.pam", width, height, gradient_pixels(width, height))
+
+
+@pytest.fixture
+def gradient_npy(tmp_path: Path) -> Path:
+    """The same gradient as `gradient_bmp`, as a bare NumPy array."""
+    width = height = 16
+    return write_npy(tmp_path / "gradient.npy", width, height, gradient_pixels(width, height))
+
+
+@pytest.fixture
+def sample_npy() -> Path:
+    """The 400x400 sample as a `.npy`, written by numpy from Pillow's array."""
+    return _sample("earth.npy")
 
 
 @pytest.fixture

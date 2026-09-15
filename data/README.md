@@ -15,9 +15,10 @@ walsh extract  /tmp/out.cim data/<recreated>
 
 ## The Blue Marble sample
 
-`earth.ppm`, `earth.tiff` and `earth.pam` are the same 400x400 picture in three
-containers, so they also serve as a check that the source format does not
-affect the result: compressing any of them produces a byte-identical `.cim`.
+`earth.ppm`, `earth.tiff`, `earth.pam` and `earth.npy` are the same 400x400
+picture in four containers, so they also serve as a check that the source
+format does not affect the result: compressing any of them produces a
+byte-identical `.cim`.
 
 - **Source:** [The Earth seen from Apollo 17](https://commons.wikimedia.org/wiki/File:The_Earth_seen_from_Apollo_17.jpg)
   on Wikimedia Commons — the "Blue Marble" photograph taken on 7 December 1972.
@@ -31,7 +32,9 @@ affect the result: compressing any of them produces a byte-identical `.cim`.
   unavoidable. `earth.tiff` was then written from `earth.ppm` by this package,
   as an uncompressed little-endian single-strip TIFF, and so was `earth.pam`,
   which is byte-identical to what Netpbm's `pamtopam` produces from
-  `earth.ppm`.
+  `earth.ppm`. `earth.npy` is `numpy.save` of the `(400, 400, 3)` `uint8` array
+  Pillow reads from `earth.ppm`; this package's own `.npy` writer reproduces
+  it byte for byte, which is the check that the two agree on the layout.
 
 Reproduce the PPM with:
 
@@ -58,8 +61,10 @@ im.crop((left, top, left + side, top + side)).resize((400, 400), Image.LANCZOS).
 | `recreated.tiff` | `earth.tiff` round-tripped | 25.07 dB |
 | `earth.pam` | Blue Marble, Netpbm PAM (`P7`, RGB) | — |
 | `recreated.pam` | `earth.pam` round-tripped | 25.07 dB |
+| `earth.npy` | Blue Marble, bare NumPy array `(400, 400, 3)` `uint8` | — |
+| `recreated.npy` | `earth.npy` round-tripped | 25.07 dB |
 
-The three Blue Marble reconstructions are pixel-identical, as they must be:
+The four Blue Marble reconstructions are pixel-identical, as they must be:
 the codec sees the same picture whichever container it arrives in.
 
 See the [main README](../README.md#reading-the-psnr-figures) for what the dB

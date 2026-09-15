@@ -49,8 +49,8 @@ exists, so aliases count. It belongs in the CLI, not in `Task`, whose
 
 `src/` layout, package name `walsh`, built with setuptools. Tests import the
 installed package, so an editable install must exist before `pytest` will work.
-`tests/conftest.py` exposes `write_bmp`, `write_ppm`, `write_pam` and
-`write_tiff` helpers plus `gradient_*` and `sample_*` fixtures per format; test
+`tests/conftest.py` exposes `write_bmp`, `write_ppm`, `write_pam`, `write_tiff`
+and `write_npy` helpers plus `gradient_*` and `sample_*` fixtures per format; test
 modules import the helpers as `from conftest import ...`, which works because
 pytest puts `tests/` on `sys.path`.
 
@@ -82,7 +82,25 @@ byte (0.4.5, #23). It belongs at `save()`, not in the setters: the documented
 `set_dimensions` then `set_raw_data` build is transiently inconsistent by
 design. `CustomizableImage` is deliberately not a `RasterImage` and keeps no
 such invariant. `bmp.py` converts both ways (BMP is blue-green-red
-and bottom-up); `ppm.py`, `pam.py` and `tiff.py` need no conversion.
+and bottom-up); `ppm.py`, `pam.py`, `tiff.py` and `npy.py` need no conversion.
+
+`npy.py` (0.4.8) reads and writes NumPy's `.npy` container, the raw pixel
+matrix for images that already live in an array. The array carries no colour
+metadata, so the profile is declared, not detected: `uint8` only; `(h, w, 3)`
+is RGB, `(h, w)` and `(h, w, 1)` are greyscale replicated to three channels,
+`(h, w, 4)` is RGBA and accepted only when alpha is 255 throughout, since a
+non-opaque fourth channel is either transparency (flattening invents a
+background) or CMYK (a colour-space conversion, undefined without a profile,
+and indistinguishable from RGBA by shape). Everything else is rejected by
+name. The header is parsed with `np.lib.format.read_magic` /
+`read_array_header_1_0` and validated **before** the body is read; a pickled
+`object` array is refused from the header dtype and `np.load` is never called
+with pickling enabled. Versions 1.0 and 2.0 are accepted; 3.0 exists only for
+structured dtypes and is rejected by name. The writer is `np.save` of a
+C-ordered `(h, w, 3)` `uint8` through the staged `open_binary_write`, so its
+bytes are deterministic and byte-identical to `np.save` of the same array —
+`data/earth.npy` was written by numpy from Pillow's array and the writer
+reproduces it exactly, which is the foreign-writer check.
 
 `_netpbm.py` holds what PPM and PAM share, since their rasters are identical
 behind different headers: the one-byte sample decoder (one read, a lookup-table
@@ -132,7 +150,9 @@ add `MemoryError` to `EXPECTED_ERRORS` to paper over an unbounded allocation:
 its message is empty and it would relabel a genuine OOM as malformed input. `_io.py` has `align`,
 `open_binary_read` and `open_binary_write` — separate rather than one
 mode-string function, so `open()` gets a literal mode and the handle type is
-known; `open_binary(source, mode)` remains as a delegate. `__init__.py`
+known; `open_binary(source, mode)` remains as a delegate — and `read_up_to`,
+the chunked read every reader uses for a size it took from a header (moved
+there from `cim.py` in 0.4.8 so `npy.py` shares it). `__init__.py`
 re-exports everything the pre-0.2.0 single module exported, so old imports
 still work, and owns `reader_for`, which dispatches on filename suffix.
 
@@ -297,7 +317,8 @@ zero-padded edge seam (#18), which changes encoder output for images that need
 padding while leaving every existing `.cim` decoding unchanged. v0.4.4 added a
 code of conduct, v0.4.5 closed three unchecked preconditions in the raster
 layer (#23), v0.4.6 made the container's 4.2 MP block-count ceiling an
-up-front, actionable error (#19), and v0.4.7 made the `.cim` reader validate
-its header before allocating from it (#22).
+up-front, actionable error (#19), v0.4.7 made the `.cim` reader validate
+its header before allocating from it (#22), and v0.4.8 added `.npy`, a bare
+NumPy array as an image.
 Partially based on
 https://github.com/ktisha/python2012/tree/dee4beda8e22f3a66a3e31384d4b72ab66102e88/avereshchagin

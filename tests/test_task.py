@@ -205,8 +205,8 @@ def test_tiff_roundtrips_through_the_codec(gradient_tiff: Path, tmp_path: Path) 
 
 
 def test_every_source_format_compresses_identically(tmp_path: Path) -> None:
-    """BMP, PPM, PAM and TIFF of one picture must produce the same .cim."""
-    from conftest import gradient_pixels, write_bmp, write_pam, write_ppm, write_tiff
+    """BMP, PPM, PAM, TIFF and a bare array of one picture must produce the same .cim."""
+    from conftest import gradient_pixels, write_bmp, write_npy, write_pam, write_ppm, write_tiff
 
     pixels = gradient_pixels(16, 16)
     sources = {
@@ -214,6 +214,7 @@ def test_every_source_format_compresses_identically(tmp_path: Path) -> None:
         "ppm": write_ppm(tmp_path / "s.ppm", 16, 16, pixels),
         "pam": write_pam(tmp_path / "s.pam", 16, 16, pixels),
         "tif": write_tiff(tmp_path / "s.tif", 16, 16, pixels),
+        "npy": write_npy(tmp_path / "s.npy", 16, 16, pixels),
     }
     digests = {}
     for name, path in sources.items():
@@ -221,10 +222,10 @@ def test_every_source_format_compresses_identically(tmp_path: Path) -> None:
         Task().with_action("compress").with_input(str(path)).with_output(str(output)).run()
         digests[name] = output.read_bytes()
 
-    assert digests["bmp"] == digests["ppm"] == digests["pam"] == digests["tif"]
+    assert digests["bmp"] == digests["ppm"] == digests["pam"] == digests["tif"] == digests["npy"]
 
 
-@pytest.mark.parametrize("suffix", [".bmp", ".ppm", ".pam", ".tif"])
+@pytest.mark.parametrize("suffix", [".bmp", ".ppm", ".pam", ".tif", ".npy"])
 def test_extract_to_any_format_gives_the_same_picture(
     gradient_bmp: Path, tmp_path: Path, suffix: str
 ) -> None:
@@ -240,18 +241,29 @@ def test_extract_to_any_format_gives_the_same_picture(
 
 
 def test_checked_in_samples_agree_across_containers(
-    sample_ppm: Path, sample_tiff: Path, sample_pam: Path, tmp_path: Path
+    sample_ppm: Path, sample_tiff: Path, sample_pam: Path, sample_npy: Path, tmp_path: Path
 ) -> None:
-    """data/earth.ppm, earth.tiff and earth.pam are one picture in three containers."""
+    """data/earth.ppm, .tiff, .pam and .npy are one picture in four containers."""
     digests = []
-    for source in (sample_ppm, sample_tiff, sample_pam):
+    for source in (sample_ppm, sample_tiff, sample_pam, sample_npy):
         output = tmp_path / f"{source.suffix.lstrip('.')}.cim"
         Task().with_action("compress").with_input(str(source)).with_output(str(output)).run()
         digests.append(output.read_bytes())
 
-    np.testing.assert_array_equal(_pixels(sample_ppm), _pixels(sample_tiff))
-    np.testing.assert_array_equal(_pixels(sample_ppm), _pixels(sample_pam))
-    assert digests[0] == digests[1] == digests[2]
+    for other in (sample_tiff, sample_pam, sample_npy):
+        np.testing.assert_array_equal(_pixels(sample_ppm), _pixels(other))
+    assert digests[0] == digests[1] == digests[2] == digests[3]
+
+
+def test_sample_npy_survives_the_round_trip(sample_npy: Path, tmp_path: Path) -> None:
+    compressed = tmp_path / "earth.cim"
+    restored = tmp_path / "earth.npy"
+    Task().with_action("compress").with_input(str(sample_npy)).with_output(str(compressed)).run()
+    assert compressed.stat().st_size < sample_npy.stat().st_size
+
+    Task().with_action("extract").with_input(str(compressed)).with_output(str(restored)).run()
+    assert np.abs(_pixels(sample_npy) - _pixels(restored)).mean() < 20
+    assert np.load(restored, allow_pickle=False).shape == (400, 400, 3)
 
 
 def test_sample_pam_survives_the_round_trip(sample_pam: Path, tmp_path: Path) -> None:
