@@ -39,7 +39,9 @@ class RasterImage(ABC):
         """Read an image from ``filename``, replacing any current contents.
 
         Args:
-            filename: Path to read, or ``None`` to read from stdin.
+            filename: Path to read, or ``None`` to read from ``sys.stdin``.
+                Whether a non-seekable stdin works depends on the format; each
+                subclass says.
 
         Raises:
             UnsupportedFileFormatError: If the data is not in this subclass's

@@ -237,7 +237,8 @@ class CustomizableImage:
         """Read a ``.cim`` file.
 
         Args:
-            filename: Path to read, or ``None`` to read from stdin.
+            filename: Path to read, or ``None`` to read from ``sys.stdin``.
+                Reads forward only, so a pipe works.
 
         Returns:
             The populated container.

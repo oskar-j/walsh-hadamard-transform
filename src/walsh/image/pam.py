@@ -182,7 +182,8 @@ class PAMImage(RasterImage):
         """Read a PAM from ``filename``, replacing any current contents.
 
         Args:
-            filename: Path to read, or ``None`` to read from stdin.
+            filename: Path to read, or ``None`` to read from ``sys.stdin``.
+                Reads forward only, so a pipe works.
 
         Raises:
             UnsupportedFileFormatError: If the data is not a supported PAM.

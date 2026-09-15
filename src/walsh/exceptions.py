@@ -24,7 +24,15 @@ class WalshError(Exception):
 
 
 class UnsupportedFileFormatError(WalshError):
-    """Raised for BMP files that are not 24-bit, single-plane, uncompressed."""
+    """Raised when a file is not in a format this package supports, or is a
+    variant of one that it does not.
+
+    Every reader raises it with a message naming what it found: an unknown
+    filename suffix, a bad magic number, a profile outside the supported
+    subset (a BMP that is not 24-bit, 16-bit Netpbm samples, a compressed or
+    planar TIFF, a NumPy array that is not ``uint8``), a truncated file, or a
+    ``.cim`` header that does not describe a consistent image.
+    """
 
 
 #: Failures that mean "this input cannot be processed" rather than "this code is

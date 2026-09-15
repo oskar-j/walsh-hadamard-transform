@@ -194,7 +194,9 @@ class PPMImage(RasterImage):
         """Read a PPM from ``filename``, replacing any current contents.
 
         Args:
-            filename: Path to read, or ``None`` to read from stdin.
+            filename: Path to read, or ``None`` to read from ``sys.stdin``. P6
+                reads forward only; P3 seeks while tokenising, so a pipe raises
+                ``io.UnsupportedOperation`` for it.
 
         Raises:
             UnsupportedFileFormatError: If the data is not a supported PPM.

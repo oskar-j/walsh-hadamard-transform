@@ -92,7 +92,9 @@ class Task:
         """Set where the input is read from.
 
         Args:
-            source: Path to read, or ``None`` to read from stdin.
+            source: Path to read, or ``None`` to read from ``sys.stdin``,
+                which the CLI never does; see
+                :data:`~walsh.image.FileSource` for what that requires.
 
         Returns:
             This task, so calls can be chained.
@@ -137,10 +139,16 @@ class Task:
         """Enable the second, independent lossy knob.
 
         Args:
-            coeff: Threshold at or below which Hadamard matrix entries are
-                zeroed during construction, or ``None`` to leave the matrix
-                intact. See :class:`~walsh.transforms.WalshHadamardTransform`
-                for how the comparison behaves.
+            coeff: Magnitude below which spectral coefficients are zeroed by
+                the transform, or ``None`` to keep every coefficient. Strict,
+                so a coefficient exactly equal to ``coeff`` is kept. It acts
+                on the *spectrum* of each block, never on the Hadamard matrix,
+                whose entries all share one magnitude; see
+                :class:`~walsh.transforms.WalshHadamardTransform`. The value
+                is absolute, so its effect scales with the block size, and it
+                is consumed only by :meth:`compress`: :meth:`extract` never
+                thresholds. A negative value is rejected when :meth:`run`
+                builds the transform, not here.
 
         Returns:
             This task, so calls can be chained.

@@ -20,8 +20,12 @@ __all__ = [
     "read_up_to",
 ]
 
-#: Where an image is read from or written to. ``None`` means the standard
-#: streams, which lets the codec be used in a shell pipeline.
+#: Where an image is read from or written to. ``None`` means ``sys.stdin`` or
+#: ``sys.stdout``. That is a library affordance -- ``Task().with_input(None)``,
+#: ``reader_for(None)`` -- and not reachable from the CLI, whose arguments are
+#: paths. On the read side it also needs a **seekable** stdin for BMP, TIFF and
+#: ASCII PPM, which seek while parsing; a ``< file`` redirect provides one, a
+#: pipe does not. Binary PPM, PAM, ``.npy`` and ``.cim`` read forward only.
 FileSource = str | PathLike[str] | None
 
 #: Prefix for the staging file :func:`open_binary_write` writes through. The
@@ -81,7 +85,7 @@ def open_binary_read(source: FileSource) -> Generator[BinaryIO, None, None]:
     """Open ``source`` for binary reading, or fall back to stdin.
 
     Args:
-        source: Path to open, or ``None`` to read from stdin.
+        source: Path to open, or ``None`` to read from ``sys.stdin``.
 
     Yields:
         The open binary stream. Standard input is deliberately not closed.

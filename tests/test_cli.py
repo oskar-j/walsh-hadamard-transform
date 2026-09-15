@@ -322,3 +322,39 @@ def test_block_sizes_below_one_are_refused_before_any_work(
     assert result.exit_code == 2, result.output
     assert "Invalid value" in result.output
     assert not (tmp_path / "o.cim").exists()
+
+
+# -- the help screens are for users, not for readers of the source --------
+
+
+@pytest.mark.parametrize("command", [[], ["compress"], ["extract"]])
+def test_help_stops_before_the_docstring_sections(runner: CliRunner, command: list[str]) -> None:
+    """Click reflowed the Google Args:/Raises: sections into one run, complete
+    with RST backticks and an internal exception class name. A form feed in
+    each docstring now ends what --help prints. The docstrings must stay plain
+    strings: a raw string would print a literal backslash-f instead."""
+    result = runner.invoke(main, [*command, "--help"])
+    assert result.exit_code == 0, result.output
+    for leak in ("Args:", "Raises:", "``", "ClickException", "form feed"):
+        assert leak not in result.output, (command, leak, result.output)
+
+
+def test_help_still_says_what_each_command_does(runner: CliRunner) -> None:
+    """The form feed must cut after the summary, not before it."""
+    assert "Walsh-Hadamard" in runner.invoke(main, ["--help"]).output
+    assert "Transform a raster image" in runner.invoke(main, ["compress", "--help"]).output
+    assert "Restore an image" in runner.invoke(main, ["extract", "--help"]).output
+
+
+def test_coeff_removal_help_describes_what_the_code_does(runner: CliRunner) -> None:
+    """It thresholds spectral coefficients, strictly below, never the matrix.
+
+    The old text, "Zero Hadamard matrix entries at or below this threshold",
+    was the 0.2.1 bug restated as documentation, and it sent users to a scale
+    (every matrix entry is 0.35 at block 8) where the option is a no-op.
+    """
+    output = runner.invoke(main, ["compress", "--help"]).output
+    assert "spectral coefficients" in output
+    assert "strictly below" in output
+    assert "block size" in output
+    assert "matrix" not in output
