@@ -93,6 +93,7 @@ walsh compress photo.ppm out.cim
 walsh extract  out.cim restored.bmp     # PPM in, BMP out
 walsh extract  out.cim restored.tif     # or TIFF out
 walsh extract  out.cim restored.pam     # or PAM out
+walsh extract  out.cim restored.npy     # or a bare NumPy array
 ```
 
 `compress` accepts `--packed-block-size` (how many low-frequency coefficients
@@ -239,6 +240,7 @@ refuses to accept the same version twice.
 | --- | --- | --- |
 | `.bmp` | Windows bitmap | 24-bit, single plane, uncompressed. Top-down (negative height) files are understood. |
 | `.ppm`, `.pnm` | Netpbm portable pixmap | `P6` binary and `P3` ASCII are read; `P6` is written. Header comments are skipped and a `maxval` below 255 is rescaled. 16-bit samples are rejected. |
+| `.npy` | NumPy array | The raw pixel matrix in NumPy's own container, for images that already live in an array. Read: `uint8` of shape `(height, width, 3)` as RGB, `(height, width)` or `(height, width, 1)` as greyscale, and `(height, width, 4)` as RGBA only when fully opaque. Other dtypes, other channel counts, transparency and CMYK are rejected by name; pickled files are refused from the header and never loaded. Written as `(height, width, 3)` `uint8`, so `numpy.load` reads it back as is. Channel order is RGB; a BGR array, as OpenCV produces, is `array[..., ::-1]`. |
 | `.pam` | Netpbm portable arbitrary map | `P7` with `DEPTH 3`, `TUPLTYPE RGB` (or none) and `MAXVAL` up to 255 is read and written; a lower `maxval` is rescaled. Header keys may come in any order, comment and blank lines are skipped. Greyscale, alpha, other tuple types and 16-bit samples are rejected by name. The writer's output is byte-identical to Netpbm's own `pamtopam`. |
 | `.tif`, `.tiff` | Uncompressed baseline TIFF | Both byte orders and multi-strip files are read; little-endian single-strip is written. Only the uncompressed RGB 8-bit chunky profile is supported -- LZW, palette, CMYK, greyscale, 16-bit, planar and rotated files are rejected by name. |
 

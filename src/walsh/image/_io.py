@@ -11,7 +11,14 @@ from collections.abc import Generator
 from os import PathLike
 from typing import BinaryIO
 
-__all__ = ["FileSource", "align", "open_binary", "open_binary_read", "open_binary_write"]
+__all__ = [
+    "FileSource",
+    "align",
+    "open_binary",
+    "open_binary_read",
+    "open_binary_write",
+    "read_up_to",
+]
 
 #: Where an image is read from or written to. ``None`` means the standard
 #: streams, which lets the codec be used in a shell pipeline.
@@ -27,6 +34,9 @@ _STAGING_SUFFIX = ".tmp"
 #: have produced, i.e. 0666 less the process umask.
 _DEFAULT_FILE_MODE = 0o666
 
+#: How much to ask a stream for at once in :func:`read_up_to`.
+_READ_CHUNK = 1 << 20
+
 
 def align(x: int, a: int) -> int:
     """Round ``x`` up to the next multiple of ``a``.
@@ -39,6 +49,31 @@ def align(x: int, a: int) -> int:
         The smallest multiple of ``a`` that is greater than or equal to ``x``.
     """
     return (((x - 1) // a) + 1) * a
+
+
+def read_up_to(file: BinaryIO, size: int) -> bytes:
+    """Read up to ``size`` bytes, in chunks, stopping early at end of stream.
+
+    ``file.read(size)`` allocates ``size`` bytes before reading, so a header
+    that declares gigabytes of pixel data would exhaust memory before the
+    first byte arrived, however small the file. Chunking costs only what the
+    stream actually holds. Every reader that sizes a read from a header
+    field it has not yet been able to trust should use this.
+
+    Args:
+        file: Stream to read from.
+        size: The most bytes wanted.
+
+    Returns:
+        The bytes read, fewer than ``size`` only if the stream ended.
+    """
+    data = bytearray()
+    while len(data) < size:
+        chunk = file.read(min(_READ_CHUNK, size - len(data)))
+        if not chunk:
+            break
+        data += chunk
+    return bytes(data)
 
 
 @contextlib.contextmanager

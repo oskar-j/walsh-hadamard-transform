@@ -15,7 +15,7 @@ import numpy as np
 import numpy.typing as npt
 
 from walsh.exceptions import UnsupportedFileFormatError
-from walsh.image._io import FileSource, open_binary_read, open_binary_write
+from walsh.image._io import FileSource, open_binary_read, open_binary_write, read_up_to
 
 __all__ = [
     "COEFF_DTYPE",
@@ -34,11 +34,6 @@ COEFF_MAX = int(np.iinfo(COEFF_DTYPE).max)
 
 #: Channel keys, in the order they appear on disk.
 CHANNELS = ("y", "cb", "cr")
-
-#: How much of a channel's coefficient data to ask the stream for at once.
-#: ``file.read(n)`` allocates ``n`` bytes before reading, so asking for the
-#: header's declared total would let a 26-byte file request terabytes.
-_READ_CHUNK = 1 << 20
 
 
 def blocks_for(width: int, height: int, block_size: int) -> int:
@@ -203,31 +198,7 @@ class CustomizableImage:
                 )
 
     @staticmethod
-    def _read_up_to(file: BinaryIO, size: int) -> bytes:
-        """Read up to ``size`` bytes, in chunks, stopping early at end of stream.
-
-        ``file.read(size)`` allocates ``size`` bytes before reading, so a
-        header that declares terabytes of coefficients would exhaust memory
-        before the first byte arrived. Chunking costs only what the stream
-        actually holds.
-
-        Args:
-            file: Stream to read from.
-            size: The most bytes wanted.
-
-        Returns:
-            The bytes read, fewer than ``size`` only if the stream ended.
-        """
-        data = bytearray()
-        while len(data) < size:
-            chunk = file.read(min(_READ_CHUNK, size - len(data)))
-            if not chunk:
-                break
-            data += chunk
-        return bytes(data)
-
-    @classmethod
-    def _read_blocks(cls, file: BinaryIO, description: BlockDescription) -> list[Block]:
+    def _read_blocks(file: BinaryIO, description: BlockDescription) -> list[Block]:
         """Read one channel's blocks, zero-padding each back to full size.
 
         Args:
@@ -247,7 +218,8 @@ class CustomizableImage:
         original, packed, count = description
         block_size = packed * packed * COEFF_DTYPE.itemsize
 
-        raw = cls._read_up_to(file, block_size * count)
+        # Sized from a header field, so never asked for in one call: see read_up_to.
+        raw = read_up_to(file, block_size * count)
         if len(raw) < block_size * count:
             index = len(raw) // block_size
             raise UnsupportedFileFormatError(

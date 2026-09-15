@@ -130,7 +130,7 @@ def compress(
     """Transform a raster image into a .cim file.
 
     The input format is taken from the filename suffix: .bmp, .ppm, .pnm,
-    .pam, .tif or .tiff.
+    .pam, .tif, .tiff, or .npy for a bare NumPy array.
 
     Args:
         input_path: Image to read.
@@ -170,8 +170,8 @@ def extract(input_path: str, output_path: str) -> None:
 
     Args:
         input_path: The .cim file to read.
-        output_path: Image to write, ending .bmp, .ppm, .pnm, .pam, .tif or
-            .tiff.
+        output_path: Image to write, ending .bmp, .ppm, .pnm, .pam, .tif,
+            .tiff or .npy.
 
     Raises:
         click.ClickException: If the .cim file is malformed, or the output

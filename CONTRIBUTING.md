@@ -63,7 +63,7 @@ uv run mypy
 
 Tests import the installed package, so an editable install has to exist before
 pytest will work — `uv sync` handles that. `tests/conftest.py` provides
-`write_bmp`, `write_ppm`, `write_pam` and `write_tiff` helpers plus a
+`write_bmp`, `write_ppm`, `write_pam`, `write_tiff` and `write_npy` helpers plus a
 `gradient_*` fixture (a synthetic 16x16 picture) and a `sample_*` fixture (the
 checked-in 400x400 sample) for each format.
 
@@ -119,10 +119,12 @@ version are a no-op.
 ## What is wanted at the moment
 
 * Check the "Issues" section for something to pick up
-* Support for more uncompressed formats — headerless RAW and TGA are the
-  obvious next ones, and PNG would need no new dependency since `zlib` is in
-  the standard library. The `image` package is laid out to make them
-  self-contained additions; PAM in 0.4.1 is the template. Widening the TIFF
+* Support for more uncompressed formats — TGA is the obvious next one, and
+  PNG would need no new dependency since `zlib` is in the standard library
+  (#17). Headerless RAW is largely covered by `.npy` since 0.4.8, which carries
+  the shape and dtype a raw file lacks. The `image` package is laid out to
+  make them self-contained additions; PAM in 0.4.1 and NPY in 0.4.8 are the
+  templates. Widening the TIFF
   profile (PackBits, planar, 16-bit) is another self-contained piece
 * A numpy-backed `RasterImage`. Since 0.4.0 the codec core is vectorised and
   what remains of the run time is the format readers and writers building and

@@ -9,6 +9,72 @@ The `## [x.y.z]` headings are load-bearing: the release workflow extracts the
 section matching the version in `pyproject.toml` and uses it as the GitHub
 Release notes.
 
+## [0.4.8]
+
+### Added
+
+- **`.npy` support: a bare NumPy array as an image**, read and written under
+  the `.npy` suffix. `.npy` is NumPy's own container -- a magic string, a
+  one-line header giving shape, dtype and memory order, then the array's
+  bytes -- and it is the natural way to hand the codec an image that already
+  lives in an array, from Pillow, OpenCV, a camera or a numerical pipeline,
+  without converting to a picture format first. It needs no dependency this
+  package did not already have, and a headerless raw file's one shortcoming,
+  that nothing records its shape, is exactly what the header supplies.
+
+  An array carries no colour metadata, so the profile is declared rather
+  than detected. Accepted: `uint8` arrays of shape `(height, width, 3)` as
+  RGB; `(height, width)` and `(height, width, 1)` as greyscale, replicated
+  across the channels; and `(height, width, 4)` as RGBA only when every alpha
+  is 255, in which case the channel is dropped. Rejected by name: any other
+  dtype, because a float array could be scaled 0-1 or 0-255 and guessing is
+  how silent corruption starts; any other channel count; and a fourth channel
+  that is not fully opaque, which is either transparency, only flattenable by
+  inventing a background, or CMYK, a colour-space conversion undefined
+  without a profile that the shape alone cannot tell apart from RGBA. Channel
+  order is RGB by definition; a BGR array as OpenCV produces is
+  `array[..., ::-1]`, and a test proves that round trip. Both header versions
+  NumPy writes for plain arrays are read (1.0 and 2.0); Fortran-ordered
+  bodies decode correctly.
+
+  The header is validated before a byte of the body is read, so a 144-byte
+  file declaring a 12.9 GB array is refused at baseline memory. A pickled
+  object array is refused from the header's dtype alone and `numpy.load` is
+  never invoked with pickling enabled, which would execute code from the
+  file. The writer always produces `(height, width, 3)` `uint8` in C order,
+  through the staged atomic write, and its bytes are identical to
+  `numpy.save` of the same array.
+
+  Verified against numpy itself and Pillow: a file numpy wrote from Pillow's
+  array of the Blue Marble sample loads pixel-for-pixel equal to the PPM
+  reader, compresses to the checked-in `transformed_earth.cim` byte for byte,
+  and this package's writer reproduces that numpy-written file exactly.
+  `data/earth.npy` and `data/recreated.npy` are that file and the codec's
+  output for it.
+
+- `NPYImage` is exported from `walsh` and `walsh.image`, with `NPY_DTYPE` and
+  `NPY_CHANNELS`. `tests/test_npy.py` covers the round trip, the numpy
+  reference, greyscale and opaque-RGBA handling, transparency, every rejected
+  dtype and channel count by name, the pickled file, the bomb, Fortran order,
+  format versions, malformed and truncated files, and dispatch. `.npy` joins
+  the cross-format identity tests: BMP, PPM, PAM, TIFF and NPY of one picture
+  compress to the same `.cim`, and the sample agrees across all four
+  containers.
+
+### Changed
+
+- The chunked `read_up_to` moved from `cim.py` to `image/_io.py`, so the
+  `.cim` and `.npy` readers share one implementation for any read sized from
+  a header field. No behaviour change.
+- The CLI help lists `.npy` among the suffixes.
+
+### Notes
+
+- **Codec output is unchanged.** All five previous sample outputs reproduce
+  byte for byte and the new container agrees with them.
+- 320 to 357 tests, coverage 98.72% to 98.81%; `npy.py` and `image/_io.py`
+  are at 100%. Run locally on 3.10 through 3.14.
+
 ## [0.4.7]
 
 ### Fixed
