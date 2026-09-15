@@ -34,7 +34,11 @@ The local `.venv` is Python 3.12. `walsh` is installed as a console script
 
 `cli.py` uses **click**, not argparse. `main` is a `click.group` with `compress`
 and `extract` subcommands, so tests drive it through `click.testing.CliRunner`
-rather than calling `main(argv)` — it no longer returns an int.
+rather than calling `main(argv)` — it no longer returns an int. The three
+block-size options are `click.IntRange(min=1)` (0.4.7): zero once encoded a
+header-only file that decoded to solid green. Under `CliRunner` an uncaught
+exception lands in `result.exception` and is *not* printed, so a CLI test for
+"no traceback" must assert `exit_code == 1` and `"Error:" in result.output`.
 `_reject_writing_over_the_input` runs first in both subcommands: the pipelines
 read the whole image before writing, so `walsh compress p.bmp p.bmp` used to
 succeed and destroy the original. It compares by `os.path.samefile` when OUTPUT
@@ -65,7 +69,9 @@ Between `load` and `save` everything is numpy. `_pixels_to_array` and
 tuples into an `(n, 3)` array and back (`np.fromiter` over a chained list and
 `zip` over `tolist()` columns, each about twice as fast as the obvious call).
 `_slice` and `_merge` are a single reshape each, and the block lists that flow
-between layers are views into one array. Do not reintroduce a per-pixel or
+between layers are views into one array. `_merge` derives its row count from
+the declared height, never from `len(blocks)`, and raises `ValueError` on a
+count that cannot tile the plane (0.4.7). Do not reintroduce a per-pixel or
 per-block Python loop here: that was the whole cost of the codec before 0.4.0.
 
 **`image/`** — a package, one submodule per format. `base.py` defines
@@ -110,9 +116,20 @@ oversized image up front, naming the channel and the block size that would fit
 would raise the ceiling and break every existing `.cim`, so it is a format
 decision rather than a fix. Do not "simplify" by deriving the count from the
 dimensions: a zero count is the meaningful "empty channel, fill with a neutral"
-state that `extract` relies on. A channel is read with one `read`
-and one `np.frombuffer` and written with one `tobytes`; a truncated file still
-reports the index of the first incomplete block. `_io.py` has `align`,
+state that `extract` relies on. **The reader validates the header before
+allocating from it** (0.4.7, #22): `_validate_header` runs once all three
+descriptions are read (so a short header is still "truncated", not
+"inconsistent") and requires positive dimensions, a power-of-two block size, a
+packed size in `1..block`, and a block count of `0` or exactly
+`blocks_for(width, height, block)`. That count rule is exact — the encoder pads
+to a block multiple — and `blocks_for` is the one implementation both `Task`
+and the reader use. `.cim` has no signature, so this is also how a file that
+is not a `.cim` at all is caught. Coefficients are read in bounded chunks
+(`_read_up_to`) because `file.read(n)` allocates `n` bytes first. A channel
+is decoded with one `np.frombuffer` and written with one `tobytes`; a
+truncated file still reports the index of the first incomplete block. Do not
+add `MemoryError` to `EXPECTED_ERRORS` to paper over an unbounded allocation:
+its message is empty and it would relabel a genuine OOM as malformed input. `_io.py` has `align`,
 `open_binary_read` and `open_binary_write` — separate rather than one
 mode-string function, so `open()` gets a literal mode and the handle type is
 known; `open_binary(source, mode)` remains as a delegate. `__init__.py`
@@ -279,7 +296,8 @@ output. v0.4.1 added PAM, v0.4.2 made writes atomic, and v0.4.3 fixed the
 zero-padded edge seam (#18), which changes encoder output for images that need
 padding while leaving every existing `.cim` decoding unchanged. v0.4.4 added a
 code of conduct, v0.4.5 closed three unchecked preconditions in the raster
-layer (#23), and v0.4.6 made the container's 4.2 MP block-count ceiling an
-up-front, actionable error (#19).
+layer (#23), v0.4.6 made the container's 4.2 MP block-count ceiling an
+up-front, actionable error (#19), and v0.4.7 made the `.cim` reader validate
+its header before allocating from it (#22).
 Partially based on
 https://github.com/ktisha/python2012/tree/dee4beda8e22f3a66a3e31384d4b72ab66102e88/avereshchagin

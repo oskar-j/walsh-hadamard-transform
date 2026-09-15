@@ -22,6 +22,7 @@ __all__ = [
     "MAX_BLOCKS_PER_CHANNEL",
     "BlockDescription",
     "CustomizableImage",
+    "blocks_for",
 ]
 
 Block = npt.NDArray[np.float64]
@@ -33,6 +34,30 @@ COEFF_MAX = int(np.iinfo(COEFF_DTYPE).max)
 
 #: Channel keys, in the order they appear on disk.
 CHANNELS = ("y", "cb", "cr")
+
+#: How much of a channel's coefficient data to ask the stream for at once.
+#: ``file.read(n)`` allocates ``n`` bytes before reading, so asking for the
+#: header's declared total would let a 26-byte file request terabytes.
+_READ_CHUNK = 1 << 20
+
+
+def blocks_for(width: int, height: int, block_size: int) -> int:
+    """Work out how many blocks a plane of this size is cut into.
+
+    The encoder pads each axis up to a whole number of blocks, so this is
+    exact rather than approximate: a valid ``.cim`` carries precisely this
+    many blocks per channel, or none at all.
+
+    Args:
+        width: Image width in pixels.
+        height: Image height in pixels.
+        block_size: Edge length of the blocks. Must be positive.
+
+    Returns:
+        Blocks per row times blocks per column.
+    """
+    return ((width - 1) // block_size + 1) * ((height - 1) // block_size + 1)
+
 
 #: The most blocks one channel can describe. ``DESCRIPTION_FORMAT`` stores
 #: ``number_of_blocks`` in a ``H``, an unsigned 16-bit field, so this is the
@@ -97,33 +122,118 @@ class CustomizableImage:
         return data
 
     def _read_header(self, file: BinaryIO) -> None:
-        """Read the dimensions and the three block descriptions.
+        """Read the dimensions and the three block descriptions, then check them.
 
         Args:
             file: Stream positioned at the start of the file.
 
         Raises:
             UnsupportedFileFormatError: If the stream is too short to hold the
-                header.
+                header, or the header is not self-consistent; see
+                :meth:`_validate_header`.
         """
         size = struct.calcsize(self.HEADER_FORMAT)
         self._width, self._height = struct.unpack(
             self.HEADER_FORMAT, self._read_exactly(file, size, "header")
         )
         size = struct.calcsize(self.DESCRIPTION_FORMAT)
+        descriptions: dict[str, BlockDescription] = {}
         for channel in self._descriptions:
             raw = self._read_exactly(file, size, f"{channel} block description")
-            self._descriptions[channel] = BlockDescription(
-                *struct.unpack(self.DESCRIPTION_FORMAT, raw)
+            descriptions[channel] = BlockDescription(*struct.unpack(self.DESCRIPTION_FORMAT, raw))
+        self._validate_header(descriptions)
+        self._descriptions.update(descriptions)
+
+    def _validate_header(self, descriptions: dict[str, BlockDescription]) -> None:
+        """Reject a header whose fields cannot describe one image.
+
+        ``.cim`` has no signature, so any 26 bytes parse as a header, and every
+        consumer downstream allocates, divides and reshapes on these fields.
+        Fed the repository's own BMP, the old reader decoded it as a
+        1396067650x7 image and tried to allocate 78 GB before failing; a
+        crafted 26-byte file asked for 2 PiB and died with a bare
+        ``MemoryError``. The geometry is fully determined, so it is checked
+        here instead, before anything is allocated from it:
+
+        1. both dimensions are positive;
+        2. per channel, the block size is a positive power of two, which the
+           transform requires anyway;
+        3. the packed size is at least 1 and no larger than the block;
+        4. the block count is either 0, the "empty channel" state that
+           :meth:`~walsh.task.Task.extract` fills with a neutral value, or
+           exactly the count a plane of these dimensions is cut into.
+
+        It runs after all three descriptions are read, so a file cut short in
+        the header is still reported as truncated rather than inconsistent.
+
+        Args:
+            descriptions: The three block descriptions, keyed by channel.
+
+        Raises:
+            UnsupportedFileFormatError: Naming the field that failed. The
+                packed-size message is unchanged from earlier releases.
+        """
+        if self._width <= 0 or self._height <= 0:
+            raise UnsupportedFileFormatError(
+                f"invalid .cim header: dimensions must be positive, "
+                f"got {self._width}x{self._height}"
             )
+        for channel, (original, packed, count) in descriptions.items():
+            if original < 1 or original & (original - 1):
+                raise UnsupportedFileFormatError(
+                    f"invalid .cim {channel} block description: block size {original} "
+                    f"is not a positive power of two"
+                )
+            if packed > original:
+                raise UnsupportedFileFormatError(
+                    f"invalid .cim block description: packed size {packed} exceeds "
+                    f"block size {original}"
+                )
+            if packed < 1:
+                raise UnsupportedFileFormatError(
+                    f"invalid .cim {channel} block description: packed size must be "
+                    f"at least 1, got {packed}"
+                )
+            expected = blocks_for(self._width, self._height, original)
+            if count not in (0, expected):
+                raise UnsupportedFileFormatError(
+                    f"invalid .cim {channel} block description: {count} blocks declared, "
+                    f"but a {self._width}x{self._height} image in {original}-pixel blocks "
+                    f"has {expected}"
+                )
 
     @staticmethod
-    def _read_blocks(file: BinaryIO, description: BlockDescription) -> list[Block]:
+    def _read_up_to(file: BinaryIO, size: int) -> bytes:
+        """Read up to ``size`` bytes, in chunks, stopping early at end of stream.
+
+        ``file.read(size)`` allocates ``size`` bytes before reading, so a
+        header that declares terabytes of coefficients would exhaust memory
+        before the first byte arrived. Chunking costs only what the stream
+        actually holds.
+
+        Args:
+            file: Stream to read from.
+            size: The most bytes wanted.
+
+        Returns:
+            The bytes read, fewer than ``size`` only if the stream ended.
+        """
+        data = bytearray()
+        while len(data) < size:
+            chunk = file.read(min(_READ_CHUNK, size - len(data)))
+            if not chunk:
+                break
+            data += chunk
+        return bytes(data)
+
+    @classmethod
+    def _read_blocks(cls, file: BinaryIO, description: BlockDescription) -> list[Block]:
         """Read one channel's blocks, zero-padding each back to full size.
 
         Args:
             file: Stream positioned at the channel's first block.
-            description: The layout record for this channel.
+            description: The layout record for this channel, already checked
+                by :meth:`_validate_header`.
 
         Returns:
             One square array per block, of edge ``original_block_size``, with
@@ -132,18 +242,12 @@ class CustomizableImage:
             step rather than one ``struct.unpack`` per block.
 
         Raises:
-            UnsupportedFileFormatError: If the stream ends mid-block, or the
-                description declares a packed size larger than the block.
+            UnsupportedFileFormatError: If the stream ends mid-block.
         """
         original, packed, count = description
-        if packed > original:
-            raise UnsupportedFileFormatError(
-                f"invalid .cim block description: packed size {packed} exceeds "
-                f"block size {original}"
-            )
         block_size = packed * packed * COEFF_DTYPE.itemsize
 
-        raw = file.read(block_size * count)
+        raw = cls._read_up_to(file, block_size * count)
         if len(raw) < block_size * count:
             index = len(raw) // block_size
             raise UnsupportedFileFormatError(
@@ -167,8 +271,9 @@ class CustomizableImage:
             The populated container.
 
         Raises:
-            UnsupportedFileFormatError: If the file is truncated or not a
-                ``.cim`` at all.
+            UnsupportedFileFormatError: If the file is truncated, or its
+                header does not describe a consistent image, which is how a
+                file that is not a ``.cim`` at all is caught.
             OSError: If the file cannot be read.
         """
         image = cls()
