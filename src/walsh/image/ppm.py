@@ -23,6 +23,8 @@ from __future__ import annotations
 import logging
 from typing import BinaryIO
 
+import numpy as np
+
 from walsh.exceptions import UnsupportedFileFormatError
 from walsh.image._io import FileSource, open_binary_read, open_binary_write
 from walsh.image._netpbm import NETPBM_MAX_SAMPLE, encode_samples, read_samples, rescale_sample
@@ -150,7 +152,8 @@ class PPMImage(RasterImage):
             UnsupportedFileFormatError: If the data is shorter than the header
                 promises, or a sample exceeds ``maxval``.
         """
-        self._raw_data = read_samples(file, self._width * self._height, maxval, "PPM")
+        samples = read_samples(file, self._width * self._height, maxval, "PPM")
+        self.set_array(samples.reshape(self._height, self._width, 3))
 
     def _read_ascii_data(self, file: BinaryIO, maxval: int) -> None:
         """Read P3 pixel data, as whitespace-separated decimal numbers.
@@ -186,9 +189,7 @@ class PPMImage(RasterImage):
             raise UnsupportedFileFormatError(
                 f"truncated PPM data: expected {expected} samples, got {len(samples)}"
             )
-        self._raw_data = [
-            (samples[i], samples[i + 1], samples[i + 2]) for i in range(0, expected, 3)
-        ]
+        self.set_array(np.array(samples, dtype=np.uint8).reshape(self._height, self._width, 3))
 
     def load(self, filename: FileSource) -> None:
         """Read a PPM from ``filename``, replacing any current contents.
@@ -232,4 +233,4 @@ class PPMImage(RasterImage):
         )
         with open_binary_write(filename) as file:
             file.write(header)
-            file.write(encode_samples(self._raw_data))
+            file.write(encode_samples(self.get_array()))

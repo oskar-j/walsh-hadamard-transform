@@ -14,9 +14,11 @@ import logging
 import struct
 from typing import BinaryIO
 
+import numpy as np
+
 from walsh.exceptions import UnsupportedFileFormatError
-from walsh.image._io import FileSource, align, open_binary_read, open_binary_write
-from walsh.image.base import Pixel, RasterImage
+from walsh.image._io import FileSource, align, open_binary_read, open_binary_write, read_up_to
+from walsh.image.base import RasterImage
 
 __all__ = [
     "BMP_HEADER_FORMAT",
@@ -128,23 +130,29 @@ class BMPImage(RasterImage):
             UnsupportedFileFormatError: If a row is truncated.
         """
         file.seek(self._offset)
-        stride = align(self._width * 3, BMP_ROW_ALIGNMENT)
+        row_bytes = self._width * 3
+        stride = align(row_bytes, BMP_ROW_ALIGNMENT)
 
-        rows: list[list[Pixel]] = []
-        for index in range(self._height):
-            line = file.read(stride)
-            if len(line) < self._width * 3:
-                raise UnsupportedFileFormatError(
-                    f"truncated BMP pixel data: row {index} of {self._height} "
-                    f"has {len(line)} bytes, expected at least {self._width * 3}"
-                )
-            # BMP stores blue, green, red; the contract is red, green, blue.
-            rows.append([(line[i + 2], line[i + 1], line[i]) for i in range(0, self._width * 3, 3)])
+        # Sized from header fields, so never asked for in one call. The last
+        # row's padding may be missing, as before; only its pixels must be.
+        data = read_up_to(file, stride * self._height)
+        needed = stride * (self._height - 1) + row_bytes
+        if len(data) < needed:
+            index = min(len(data) // stride, self._height - 1)
+            present = min(len(data) - index * stride, stride)
+            raise UnsupportedFileFormatError(
+                f"truncated BMP pixel data: row {index} of {self._height} "
+                f"has {present} bytes, expected at least {row_bytes}"
+            )
+        data = data.ljust(stride * self._height, b"\x00")
 
+        # One reshape drops the row padding; BMP stores blue, green, red and,
+        # unless the height was negative, bottom row first.
+        rows = np.frombuffer(data, dtype=np.uint8).reshape(self._height, stride)
+        pixels = rows[:, :row_bytes].reshape(self._height, self._width, 3)[:, :, ::-1]
         if not self._top_down:
-            rows.reverse()
-
-        self._raw_data = [pixel for row in rows for pixel in row]
+            pixels = pixels[::-1]
+        self.set_array(pixels)
 
     def load(self, filename: FileSource) -> None:
         """Read a BMP from ``filename``, replacing any current contents.
@@ -202,13 +210,12 @@ class BMPImage(RasterImage):
             file: Stream to write to.
         """
         padding = align(self._width * 3, BMP_ROW_ALIGNMENT) - self._width * 3
-        pad = b"\x00" * padding
         log.debug("row padding: %d byte(s)", padding)
 
-        for start in range(len(self._raw_data) - self._width, -1, -self._width):
-            row = self._raw_data[start : start + self._width]
-            file.write(b"".join(struct.pack("<BBB", b, g, r) for r, g, b in row))
-            file.write(pad)
+        # Red-green-blue top-down in, blue-green-red bottom-up out, each row
+        # padded to a multiple of four bytes: three views and one pad.
+        bgr = self.get_array()[::-1, :, ::-1].reshape(self._height, self._width * 3)
+        file.write(np.pad(bgr, ((0, 0), (0, padding))).tobytes())
 
     def save(self, filename: FileSource) -> None:
         """Write this bitmap to ``filename``.

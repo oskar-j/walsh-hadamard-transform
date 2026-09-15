@@ -2,15 +2,25 @@
 
 from __future__ import annotations
 
+import itertools
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 
+import numpy as np
+import numpy.typing as npt
+
 from walsh.image._io import FileSource
 
-__all__ = ["Pixel", "RasterImage"]
+__all__ = ["CHANNELS", "Pixel", "PixelArray", "RasterImage"]
 
 #: One pixel as ``(red, green, blue)``, each channel a 0-255 integer.
 Pixel = tuple[int, int, int]
+
+#: An image as an array: ``uint8``, shape ``(height, width, 3)``, RGB.
+PixelArray = npt.NDArray[np.uint8]
+
+#: Samples per pixel in the in-memory contract.
+CHANNELS = 3
 
 
 class RasterImage(ABC):
@@ -22,17 +32,24 @@ class RasterImage(ABC):
     * pixels are ``(red, green, blue)`` triples, **never** the file's own
       channel order;
     * rows run **top to bottom**, and within a row, left to right;
-    * ``get_raw_data()`` returns ``width * height`` pixels.
+    * there are exactly ``width * height`` of them.
 
     A format whose on-disk layout differs, as BMP's does on both counts, is
     responsible for converting in :meth:`load` and :meth:`save`.
+
+    The pixels are held as one ``uint8`` array, and :meth:`get_array` /
+    :meth:`set_array` are the primary accessors (0.4.10). Up to 0.4.9 the
+    store was a Python list of tuples, and marshalling pixels through it was
+    about half of the codec's wall time and some 70 bytes per pixel of
+    memory. :meth:`get_raw_data` / :meth:`set_raw_data` remain as converters
+    for callers that still want the list.
     """
 
     def __init__(self) -> None:
         """Create an empty image with zero dimensions and no pixels."""
         self._width = 0
         self._height = 0
-        self._raw_data: list[Pixel] = []
+        self._pixels: PixelArray = np.empty((0, CHANNELS), dtype=np.uint8)
 
     @abstractmethod
     def load(self, filename: FileSource) -> None:
@@ -84,39 +101,105 @@ class RasterImage(ABC):
     def _check_complete(self) -> None:
         """Verify the pixel count matches the dimensions, before writing.
 
-        The class contract says ``get_raw_data()`` holds ``width * height``
-        pixels, but the two-call build -- :meth:`set_dimensions` then
-        :meth:`set_raw_data` -- is transiently inconsistent by design, so this
-        cannot live in either setter. Every :meth:`save` calls it first
-        instead, and before writing any header: too few pixels used to produce
-        a file that no reader in this package can load, and too many used to
-        drop the surplus with no error at all.
+        The class contract is ``width * height`` pixels, but the two-call
+        build -- :meth:`set_dimensions` then :meth:`set_raw_data` -- is
+        transiently inconsistent by design, so this cannot live in either
+        setter. Every :meth:`save` calls it first instead, and before writing
+        any header: too few pixels used to produce a file that no reader in
+        this package can load, and too many used to drop the surplus with no
+        error at all. :meth:`get_array` calls it too, since it cannot shape
+        the array otherwise.
 
         Raises:
             ValueError: If the number of pixels held is not exactly
                 ``width * height``.
         """
         expected = self._width * self._height
-        if len(self._raw_data) != expected:
+        if len(self._pixels) != expected:
             raise ValueError(
-                f"image holds {len(self._raw_data)} pixel(s) but its dimensions "
+                f"image holds {len(self._pixels)} pixel(s) but its dimensions "
                 f"{self._width}x{self._height} require {expected}"
             )
 
-    def get_raw_data(self) -> list[Pixel]:
-        """Return the pixels, as RGB triples, top row first.
+    def get_array(self) -> PixelArray:
+        """Return the pixels as a ``(height, width, 3)`` ``uint8`` array.
+
+        This is the primary accessor and the one the codec uses: no per-pixel
+        Python object is created on the way in or out.
 
         Returns:
-            The live internal list of ``width * height`` pixels. Mutating it
-            mutates the image.
-        """
-        return self._raw_data
+            A view of the image's own storage, so mutating it mutates the
+            image. It is C-contiguous, so ``reshape(-1, 3)`` and ``tobytes()``
+            are free.
 
-    def set_raw_data(self, new_data: Sequence[Pixel]) -> None:
-        """Replace the pixels.
+        Raises:
+            ValueError: If the pixel count does not match the dimensions,
+                which can only happen midway through a
+                :meth:`set_dimensions` / :meth:`set_raw_data` build.
+        """
+        self._check_complete()
+        return self._pixels.reshape(self._height, self._width, CHANNELS)
+
+    def set_array(self, array: npt.ArrayLike) -> None:
+        """Replace the pixels and the dimensions from one array.
 
         Args:
-            new_data: ``width * height`` RGB triples, top row first. Copied
-                into the image, so the caller may reuse the sequence.
+            array: ``uint8`` of shape ``(height, width, 3)``, RGB, top row
+                first. The image keeps a reference rather than a copy when
+                the array is already contiguous ``uint8``, so copy first if
+                you will go on mutating it. A read-only array (for example one
+                made by ``np.frombuffer``) is copied, so :meth:`get_array`
+                always hands back something writable.
+
+        Raises:
+            ValueError: If the array is not three-dimensional with three
+                channels, or its dtype is not ``uint8``. The dtype is checked
+                rather than cast because a silent cast is how a float or a
+                value above 255 would become a wrong pixel with no error.
         """
-        self._raw_data = list(new_data)
+        pixels = np.asarray(array)
+        if pixels.dtype != np.uint8:
+            raise ValueError(f"pixels must be uint8, got {pixels.dtype}")
+        if pixels.ndim != 3 or pixels.shape[2] != CHANNELS:
+            raise ValueError(
+                f"pixels must be shaped (height, width, {CHANNELS}), got {pixels.shape}"
+            )
+        pixels = np.ascontiguousarray(pixels)
+        if not pixels.flags.writeable:
+            pixels = pixels.copy()
+        # Through the method, not the attributes: a subclass may derive header
+        # fields from the dimensions there, as BMP does for its size fields.
+        self.set_dimensions(pixels.shape[1], pixels.shape[0])
+        self._pixels = pixels.reshape(-1, CHANNELS)
+
+    def get_raw_data(self) -> list[Pixel]:
+        """Return the pixels as a list of RGB triples, top row first.
+
+        A converter kept for callers that predate :meth:`get_array`. It builds
+        a fresh list on every call, so mutating the result does **not**
+        mutate the image -- that was true of the list store up to 0.4.9 and
+        is not any more. Use :meth:`get_array` for the live pixels.
+
+        Returns:
+            ``width * height`` tuples of three ints.
+        """
+        r, g, b = self._pixels.T.tolist()
+        return list(zip(r, g, b, strict=True))
+
+    def set_raw_data(self, new_data: Sequence[Pixel]) -> None:
+        """Replace the pixels from a list of RGB triples.
+
+        A converter kept for callers that predate :meth:`set_array`. It does
+        not touch the dimensions, so the documented two-call build --
+        :meth:`set_dimensions` then this -- still works; :meth:`save` checks
+        that the two agree.
+
+        Args:
+            new_data: ``width * height`` RGB triples, top row first, each
+                channel an int in 0-255. Copied, so the caller may reuse the
+                sequence.
+        """
+        samples = itertools.chain.from_iterable(new_data)
+        self._pixels = np.fromiter(samples, dtype=np.uint8, count=len(new_data) * CHANNELS).reshape(
+            -1, CHANNELS
+        )

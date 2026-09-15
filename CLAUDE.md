@@ -64,25 +64,41 @@ enum, dispatched through the `Task._ACTIONS` ClassVar; adding an action means
 adding a method *and* an entry there. Block sizes are constructor kwargs
 defaulting to the original values (Y 8, chroma 16, packed 4).
 
-Between `load` and `save` everything is numpy. `_pixels_to_array` and
-`_array_to_pixels` are the one crossing from the raster contract's list of
-tuples into an `(n, 3)` array and back (`np.fromiter` over a chained list and
-`zip` over `tolist()` columns, each about twice as fast as the obvious call).
-`_slice` and `_merge` are a single reshape each, and the block lists that flow
-between layers are views into one array. `_merge` derives its row count from
-the declared height, never from `len(blocks)`, and raises `ValueError` on a
-count that cannot tile the plane (0.4.7). Do not reintroduce a per-pixel or
-per-block Python loop here: that was the whole cost of the codec before 0.4.0.
+Between `load` and `save` everything is numpy, and since 0.4.10 (#27) so is
+the raster contract itself: `compress` reads `image.get_array().reshape(-1, 3)`
+and `extract` ends in `image.set_array(...)`, with no list of tuples anywhere.
+`_slice` returns the `(count, edge, edge)` stack it builds, `Task` calls
+`transform.transform(stack)` directly (it has taken a stack since 0.4.0), and
+`_merge` takes the stack back through `np.asarray`, free for an array and a
+stack for a list. `_merge` derives its row count from the declared height,
+never from `len(blocks)`, and raises `ValueError` on a count that cannot tile
+the plane (0.4.7). Do not reintroduce a per-pixel or per-block Python loop, a
+`list(stack)`, or an `np.stack` of views here: pixel marshalling was half the
+codec's wall time up to 0.4.9.
 
 **`image/`** — a package, one submodule per format. `base.py` defines
 `RasterImage` and **the contract that matters: RGB pixels, top row first,
-whatever the file stores**. `_check_complete` enforces the other half of that
-contract, `width * height` pixels, and every `save()` calls it before writing a
-byte (0.4.5, #23). It belongs at `save()`, not in the setters: the documented
-`set_dimensions` then `set_raw_data` build is transiently inconsistent by
-design. `CustomizableImage` is deliberately not a `RasterImage` and keeps no
-such invariant. `bmp.py` converts both ways (BMP is blue-green-red
-and bottom-up); `ppm.py`, `pam.py`, `tiff.py` and `npy.py` need no conversion.
+whatever the file stores**. The store is one `(n, 3)` `uint8` array (0.4.10,
+#27); `get_array()` / `set_array()` are the primary accessors and hand out a
+`(height, width, 3)` view of it, and `get_raw_data()` / `set_raw_data()` are
+converters kept for callers (`get_raw_data` returns a fresh list — the
+pre-0.4.10 "mutating it mutates the image" promise is gone on purpose). Two
+rules for readers: decode with `np.frombuffer` and hand `set_array` the array;
+and never route a list of tuples through `np.asarray` — measured, it is
+*slower* than per-pixel Python. A list must go through `itertools.chain` into
+`np.fromiter` with an explicit count, as `set_raw_data` does. `set_array`
+checks `uint8` rather than casting, and sets the size through
+`set_dimensions()`, not the attributes: BMP overrides it to derive its header
+size fields, and bypassing it once wrote five zero bytes into a header.
+`_check_complete` enforces `width * height` pixels, and every `save()` and
+`get_array()` calls it (0.4.5, #23). It belongs there, not in the setters: the
+documented `set_dimensions` then `set_raw_data` build is transiently
+inconsistent by design. `CustomizableImage` is deliberately not a
+`RasterImage`; it holds each channel as one `(count, edge, edge)` stack,
+`get_stack(channel)` is the array form, and `get_y_data()` and friends return
+views into it. `bmp.py` converts both ways (BMP is blue-green-red and
+bottom-up, two reversed views); `ppm.py`, `pam.py`, `tiff.py` and `npy.py`
+need no conversion.
 
 `npy.py` (0.4.8) reads and writes NumPy's `.npy` container, the raw pixel
 matrix for images that already live in an array. The array carries no colour
@@ -240,12 +256,16 @@ matrix can only ever be all-or-nothing. That was the 0.2.1 bug.
 
 ### Performance
 
-No Python-level loop touches a pixel or a block between `load` and `save`
-(0.4.0). On the 400×400 sample the codec core takes about 40 ms; the rest of
-the wall time is the format readers and writers, which build and consume the
-raster contract's list of pixel tuples, plus the two conversions across that
-boundary. A numpy-backed `RasterImage` is the next step and a public-API
-change, since `get_raw_data` returns that list.
+No Python-level object is created per pixel or per block anywhere between
+`load` and `save` (0.4.0 for the core, 0.4.10 for the raster contract, #27).
+On a 2000×2000 image, `compress` takes about 1.0 s and 490 MB peak and
+`extract` about 1.0 s and 710 MB, down from 3.2 s / 740 MB and 2.3 s /
+1035 MB; the transform arithmetic is now the largest item in the profile.
+What remains of the memory is the float64 working set of the transform (the
+YCbCr planes and the coefficient stacks at 8 bytes a sample), which is a
+different matter from the contract and would need a dtype decision, not more
+vectorisation. `tests/test_golden.py` pins the checked-in outputs byte for
+byte; run it first after any change on the pixel path.
 
 Multiprocessing was considered for the matrix build and rejected: the build
 takes about 0.1 ms at the codec's block sizes and runs once per process
@@ -318,7 +338,9 @@ padding while leaving every existing `.cim` decoding unchanged. v0.4.4 added a
 code of conduct, v0.4.5 closed three unchecked preconditions in the raster
 layer (#23), v0.4.6 made the container's 4.2 MP block-count ceiling an
 up-front, actionable error (#19), v0.4.7 made the `.cim` reader validate
-its header before allocating from it (#22), and v0.4.8 added `.npy`, a bare
-NumPy array as an image.
+its header before allocating from it (#22), v0.4.8 added `.npy`, a bare NumPy
+array as an image, v0.4.9 fixed the CLI help and the stale docstrings (#28,
+#29), and v0.4.10 made the raster contract array-backed (#27), three times
+faster on large images with byte-identical output.
 Partially based on
 https://github.com/ktisha/python2012/tree/dee4beda8e22f3a66a3e31384d4b72ab66102e88/avereshchagin

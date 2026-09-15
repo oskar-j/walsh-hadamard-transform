@@ -27,7 +27,6 @@ round-trips through ``numpy.load`` unchanged.
 
 from __future__ import annotations
 
-import itertools
 import logging
 import math
 from typing import BinaryIO, Literal
@@ -197,10 +196,9 @@ class NPYImage(RasterImage):
                 )
 
         order: Literal["C", "F"] = "F" if fortran_order else "C"
-        array = self._to_rgb(np.frombuffer(body, dtype=NPY_DTYPE).reshape(shape, order=order))
-        self._height, self._width = array.shape[0], array.shape[1]
-        r, g, b = array.reshape(-1, NPY_CHANNELS).T.tolist()
-        self._raw_data = list(zip(r, g, b, strict=True))
+        self.set_array(
+            self._to_rgb(np.frombuffer(body, dtype=NPY_DTYPE).reshape(shape, order=order))
+        )
         log.debug("loaded .npy %dx%d from %s", self._width, self._height, filename)
 
     def save(self, filename: FileSource) -> None:
@@ -213,10 +211,6 @@ class NPYImage(RasterImage):
             ValueError: If the pixel count does not match the dimensions.
             OSError: If the file cannot be written.
         """
-        self._check_complete()
-        samples = itertools.chain.from_iterable(self._raw_data)
-        array = np.fromiter(samples, dtype=NPY_DTYPE, count=len(self._raw_data) * NPY_CHANNELS)
+        array = self.get_array()
         with open_binary_write(filename) as file:
-            np.save(
-                file, array.reshape(self._height, self._width, NPY_CHANNELS), allow_pickle=False
-            )
+            np.save(file, array, allow_pickle=False)

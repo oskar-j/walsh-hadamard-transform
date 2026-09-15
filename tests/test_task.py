@@ -7,7 +7,7 @@ import pytest
 
 from walsh.exceptions import UnsupportedFileFormatError
 from walsh.image import BMPImage, PPMImage, reader_for
-from walsh.task import Action, Task, _array_to_pixels, _pixels_to_array
+from walsh.task import Action, Task
 
 
 def _pixels(path: Path) -> np.ndarray:
@@ -307,17 +307,119 @@ def test_slice_cuts_blocks_row_major_and_merge_inverts_it() -> None:
     np.testing.assert_array_equal(Task._merge(blocks, width, height), plane)
 
 
-def test_pixel_list_and_array_convert_both_ways() -> None:
+def test_get_array_is_the_live_contiguous_store() -> None:
+    """The primary accessor: a (height, width, 3) uint8 view of the image's own
+    pixels, so the codec never builds a Python object per pixel."""
     from conftest import gradient_pixels
+    from walsh.image import PPMImage
 
-    pixels = gradient_pixels(7, 5)
-    array = _pixels_to_array(pixels)
-    assert array.shape == (35, 3)
-    assert array.dtype == np.float64
+    image = PPMImage()
+    image.set_dimensions(7, 5)
+    image.set_raw_data(gradient_pixels(7, 5))
 
-    back = _array_to_pixels(array.astype(np.uint8))
+    array = image.get_array()
+    assert array.shape == (5, 7, 3)
+    assert array.dtype == np.uint8
+    assert array.flags.c_contiguous
+    assert array.flags.writeable
+
+    array[0, 0] = (9, 8, 7)  # a view, so this is the image
+    assert image.get_raw_data()[0] == (9, 8, 7)
+
+
+def test_set_array_takes_dimensions_from_the_shape() -> None:
+    from walsh.image import PPMImage
+
+    pixels = (np.arange(4 * 6 * 3) % 256).astype(np.uint8).reshape(4, 6, 3)
+    image = PPMImage()
+    image.set_array(pixels)
+    assert image.get_dimensions() == (6, 4)
+    np.testing.assert_array_equal(image.get_array(), pixels)
+    assert np.shares_memory(image.get_array(), pixels), "contiguous uint8 is kept, not copied"
+
+
+def test_set_array_copies_what_it_cannot_keep() -> None:
+    """A non-contiguous view is made contiguous; a read-only buffer, as
+    np.frombuffer yields, is copied so get_array stays writable."""
+    from walsh.image import PPMImage
+
+    base = (np.arange(4 * 8 * 3) % 256).astype(np.uint8).reshape(4, 8, 3)
+    flipped = base[::-1, ::-1]  # non-contiguous
+    image = PPMImage()
+    image.set_array(flipped)
+    np.testing.assert_array_equal(image.get_array(), flipped)
+    assert image.get_array().flags.c_contiguous
+
+    frozen = np.frombuffer(base.tobytes(), dtype=np.uint8).reshape(4, 8, 3)
+    assert not frozen.flags.writeable
+    image.set_array(frozen)
+    assert image.get_array().flags.writeable
+    np.testing.assert_array_equal(image.get_array(), base)
+
+
+@pytest.mark.parametrize(
+    ("array", "match"),
+    [
+        (np.zeros((2, 2, 3), dtype=np.float64), "must be uint8"),
+        (np.zeros((2, 2, 3), dtype=np.int32), "must be uint8"),
+        (np.zeros((2, 2), dtype=np.uint8), r"shaped \(height, width, 3\)"),
+        (np.zeros((2, 2, 4), dtype=np.uint8), r"shaped \(height, width, 3\)"),
+    ],
+)
+def test_set_array_rejects_the_wrong_dtype_or_shape(array: np.ndarray, match: str) -> None:
+    """Checked, not cast: a silent cast is how a float or a 300 would become
+    a wrong pixel with no error anywhere."""
+    from walsh.image import PPMImage
+
+    with pytest.raises(ValueError, match=match):
+        PPMImage().set_array(array)
+
+
+def test_raw_data_converters_round_trip_and_do_not_alias() -> None:
+    """get_raw_data builds a fresh list each call: the pre-0.4.10 promise that
+    mutating it mutated the image is gone, deliberately, and documented."""
+    from conftest import gradient_pixels
+    from walsh.image import PPMImage
+
+    pixels = gradient_pixels(7, 5)  # odd width, so no accidental alignment
+    image = PPMImage()
+    image.set_dimensions(7, 5)
+    image.set_raw_data(pixels)
+
+    back = image.get_raw_data()
     assert back == pixels
     assert all(type(channel) is int for channel in back[0])
+
+    back[0] = (0, 0, 0)
+    assert image.get_raw_data()[0] == pixels[0], "the list is a copy"
+    assert image.get_raw_data() is not image.get_raw_data()
+
+
+def test_the_two_call_build_is_still_transiently_inconsistent() -> None:
+    """set_dimensions then set_raw_data must keep working, and save() is still
+    where a mismatch is caught -- get_array cannot shape a mismatch either."""
+    from walsh.image import PPMImage
+
+    image = PPMImage()
+    image.set_dimensions(4, 4)
+    image.set_raw_data([(1, 2, 3)] * 3)
+    with pytest.raises(ValueError, match="require 16"):
+        image.get_array()
+
+
+def test_merge_takes_a_stack_without_copying_it() -> None:
+    """Sub-item 3 of #27: the stack that _slice produced flows through the
+    transform and back into _merge as one array, never split and re-stacked."""
+    width, height, block = 20, 13, 8
+    plane = np.arange(width * height, dtype=float).reshape(height, width)
+    stack = Task()._slice(plane.reshape(-1), width, height, block)
+    assert isinstance(stack, np.ndarray) and stack.shape == (6, 8, 8)
+    assert stack.flags.c_contiguous
+
+    merged = Task._merge(stack, width, height)
+    np.testing.assert_array_equal(merged, plane)
+    # and a plain list of blocks still works, for direct callers
+    np.testing.assert_array_equal(Task._merge(list(stack), width, height), plane)
 
 
 def test_extract_fills_channels_without_blocks_with_neutral_values(tmp_path: Path) -> None:
