@@ -10,6 +10,8 @@
 
 Compressing images with a Hadamard transform
 
+![The sample image, before and after a compress and extract round trip](https://raw.githubusercontent.com/oskar-j/walsh-hadamard-transform/master/doc/sample_usage.jpg)
+
 ## Description
 
 **From Wikipedia:** The Hadamard transform (also known as the *Walsh–Hadamard transform*, 
@@ -279,7 +281,3 @@ Walsh-Hadamard coefficients as little-endian `int16`.
 > in-memory pixel contract changed, so an old file extracted with 0.2.0 comes
 > back with red and blue swapped and vertically flipped. Re-compress from the
 > source image instead.
-
-## Effects
-
-![https://raw.githubusercontent.com/oskar-j/walsh-hadamard-transform/master/doc/sample_usage.jpg](https://raw.githubusercontent.com/oskar-j/walsh-hadamard-transform/master/doc/sample_usage.jpg)

@@ -73,6 +73,10 @@ changes, so codec output is byte-identical.
 
 - `CLAUDE.md` said `image.py` re-exports the error; it has been the `image/`
   package since 0.2.0.
+- The README's before-and-after image now sits directly under the tagline,
+  where a first-time reader sees it, instead of in an "Effects" section at the
+  very end; that section is gone, and the image has a real alt text instead
+  of its own URL.
 
 ### Notes
 
