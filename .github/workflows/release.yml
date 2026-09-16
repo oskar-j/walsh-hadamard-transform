@@ -93,22 +93,51 @@ jobs:
           cat release_notes.md
 
       # The release is the last gate before PyPI, and PyPI uploads cannot be
-      # undone, so prove the artifacts are sound before building them. The
+      # undone, so prove the tree is sound before building from it. The
       # coverage floor applies here too: nothing under-tested reaches PyPI.
+      # --locked for the same reason as in ci.yml: a stale lock must fail here,
+      # not be silently re-resolved on the way to a permanent upload.
       - name: Run the test suite with coverage
-        if: steps.check.outputs.publish == 'true'
-        run: uv run --group dev pytest -q --cov --cov-report=term-missing
+        if: steps.check.outputs.exists == 'false'
+        run: uv run --locked --group dev pytest -q --cov --cov-report=term-missing
 
       - name: Build distributions
-        if: steps.check.outputs.publish == 'true'
+        if: steps.check.outputs.exists == 'false'
         run: uv build
 
       - name: Check the distribution metadata
-        if: steps.check.outputs.publish == 'true'
+        if: steps.check.outputs.exists == 'false'
         run: uvx twine check dist/*
 
+      # The artifacts themselves, not the checkout: unpack the sdist and run
+      # its own tests, as CI does, since this is what is about to be published.
+      - name: Test the sdist from the inside
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          mkdir /tmp/sdist && tar -xzf dist/*.tar.gz -C /tmp/sdist
+          cd /tmp/sdist/walsh-*
+          uv venv .venv
+          uv pip install --python .venv/bin/python -e . pytest
+          .venv/bin/python -m pytest -q -p no:cacheprovider
+
+      # A forced retry must publish the bytes already attached to the release,
+      # not a rebuild: setuptools output is not reproducible (timestamps at
+      # least, and the build backend is unpinned), and a dispatched retry runs
+      # on the branch tip while the release was pinned to a commit. So the
+      # retry path downloads the release assets instead of building.
+      - name: Fetch the artifacts attached to the existing release
+        if: steps.check.outputs.exists == 'true' && steps.check.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p dist
+          gh release download "${{ steps.version.outputs.tag }}" --dir dist \
+            --pattern '*.whl' --pattern '*.tar.gz'
+          ls -l dist
+
       # Hand the exact same artifacts to the PyPI job, rather than rebuilding
-      # them there, so what is on PyPI matches what is on the release.
+      # them there, so what is on PyPI matches what is on the release: on a
+      # first run the freshly built files, on a retry the release's own assets.
       - name: Upload distributions for the PyPI job
         if: steps.check.outputs.publish == 'true'
         uses: actions/upload-artifact@v7

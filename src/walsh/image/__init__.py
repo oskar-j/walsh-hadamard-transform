@@ -24,6 +24,7 @@ from walsh.image.bmp import (
 )
 from walsh.image.cim import (
     COEFF_DTYPE,
+    MAX_BLOCK_SIZE,
     MAX_BLOCKS_PER_CHANNEL,
     BlockDescription,
     CustomizableImage,
@@ -41,6 +42,7 @@ __all__ = [
     "BMP_SIGNATURE",
     "COEFF_DTYPE",
     "MAX_BLOCKS_PER_CHANNEL",
+    "MAX_BLOCK_SIZE",
     "NPY_CHANNELS",
     "NPY_DTYPE",
     "PAM_DEPTH",

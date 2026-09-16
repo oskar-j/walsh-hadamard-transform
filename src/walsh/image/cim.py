@@ -20,6 +20,7 @@ from walsh.image._io import FileSource, open_binary_read, open_binary_write, rea
 __all__ = [
     "COEFF_DTYPE",
     "MAX_BLOCKS_PER_CHANNEL",
+    "MAX_BLOCK_SIZE",
     "BlockDescription",
     "CustomizableImage",
     "blocks_for",
@@ -31,6 +32,13 @@ Block = npt.NDArray[np.float64]
 COEFF_DTYPE = np.dtype("<i2")
 COEFF_MIN = int(np.iinfo(COEFF_DTYPE).min)
 COEFF_MAX = int(np.iinfo(COEFF_DTYPE).max)
+
+#: The largest block edge whose coefficients are guaranteed to fit ``int16``.
+#: The orthonormal transform of a flat block scales its mean by the edge, so
+#: an all-255 block of edge ``e`` has DC ``255 * e``; above this edge that
+#: overflows ``COEFF_MAX`` and the clip on write would silently halve it,
+#: returning a white picture mid-grey. 128 at ``int16``.
+MAX_BLOCK_SIZE = COEFF_MAX // 255
 
 #: Channel keys, in the order they appear on disk.
 CHANNELS = ("y", "cb", "cr")
@@ -383,13 +391,25 @@ class CustomizableImage:
                 stack or a sequence of blocks.
 
         Raises:
-            ValueError: If :meth:`set_descriptions` has not been called.
+            ValueError: If :meth:`set_descriptions` has not been called, or a
+                block is smaller than the packed size its description
+                declares. numpy would silently clamp the crop to the whole
+                block while the header recorded the larger size, producing a
+                file every reader in this package refuses, which is exactly
+                the guard the reader applies (``packed > original``) mirrored
+                on the write side.
         """
         for channel, blocks in (("y", y_data), ("cb", cb_data), ("cr", cr_data)):
             description = self._descriptions[channel]
             if description is None:
                 raise ValueError("set_descriptions() must be called before set_data()")
             packed = description.packed_block_size
+            for block in blocks:
+                if block.shape[0] < packed or block.shape[1] < packed:
+                    raise ValueError(
+                        f"{channel} block of shape {block.shape} is smaller than the packed "
+                        f"size {packed} its description declares"
+                    )
             # Crop every block to its kept corner. The crops are non-contiguous
             # views, so they are stacked here, once, into what the writer needs.
             cropped = [block[:packed, :packed] for block in blocks]
@@ -415,9 +435,12 @@ class CustomizableImage:
         """Write one channel's blocks as little-endian ``int16``, in one write.
 
         Coefficients are rounded to nearest and clipped into the ``int16``
-        range. Clipping cannot trigger for 8-bit input, where the largest
-        possible coefficient is well inside the range. A channel is one array
-        operation and one ``write``.
+        range. For 8-bit input the clip cannot trigger at any block edge
+        :class:`~walsh.task.Task` accepts, since those are bounded by
+        ``MAX_BLOCK_SIZE`` for exactly that reason; it stays as the last line
+        of defence for a container built by hand, where it would silently
+        saturate rather than raise. A channel is one array operation and one
+        ``write``.
 
         Args:
             file: Stream to write to.

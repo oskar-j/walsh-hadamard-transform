@@ -571,3 +571,69 @@ def test_merge_takes_its_row_count_from_the_height_not_the_block_count() -> None
     merged = Task._merge(blocks, width=6, height=6)
     assert merged.shape == (6, 6)
     assert merged[0, 0] == 0 and merged[0, 5] == 1 and merged[5, 0] == 2 and merged[5, 5] == 3
+
+
+# -- block geometry is validated once, in Task.__init__, before any file is touched --
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"y_block_size": 0}, "y_block_size must be a positive power of two, got 0"),
+        ({"cb_block_size": 6}, "cb_block_size must be a positive power of two"),
+        ({"cr_block_size": -8}, "cr_block_size must be a positive power of two"),
+        ({"y_block_size": 256, "cb_block_size": 256, "cr_block_size": 256}, "at most 128"),
+        ({"packed_block_size": 0}, "packed_block_size must be between 1 and"),
+        ({"packed_block_size": 16}, r"smallest block edge \(8\), got 16"),
+        ({"y_block_size": 4, "packed_block_size": 6}, r"\(4\), got 6"),
+    ],
+)
+def test_invalid_block_geometry_is_rejected_at_construction(
+    kwargs: dict[str, int], match: str
+) -> None:
+    """Each of these used to fail late: a bare ZeroDivisionError, a file the
+    reader refuses at exit 0, or a white picture returned mid-grey at exit 0."""
+    with pytest.raises(ValueError, match=match):
+        Task(**kwargs)
+
+
+@pytest.mark.parametrize("packed", [3, 6])
+def test_packed_size_need_not_be_a_power_of_two(
+    packed: int, gradient_ppm: Path, tmp_path: Path
+) -> None:
+    """3 and 6 compress and extract cleanly today; requiring a power of two
+    here would be a regression, not a fix."""
+    compressed, restored = tmp_path / "p.cim", tmp_path / "p.ppm"
+    task = Task(packed_block_size=packed)
+    task.with_action("compress").with_input(str(gradient_ppm)).with_output(str(compressed)).run()
+    Task().with_action("extract").with_input(str(compressed)).with_output(str(restored)).run()
+    assert _pixels(restored).shape == _pixels(gradient_ppm).shape
+
+
+def test_packed_may_equal_the_smallest_edge(gradient_ppm: Path, tmp_path: Path) -> None:
+    """--y-block-size 16 --chroma-block-size 16 --packed-block-size 16 is lossless
+    cropping and must stay legal: the bound is the smallest edge, not a constant."""
+    compressed, restored = tmp_path / "p.cim", tmp_path / "p.ppm"
+    task = Task(y_block_size=16, cb_block_size=16, cr_block_size=16, packed_block_size=16)
+    task.with_action("compress").with_input(str(gradient_ppm)).with_output(str(compressed)).run()
+    Task().with_action("extract").with_input(str(compressed)).with_output(str(restored)).run()
+    assert np.abs(_pixels(restored) - _pixels(gradient_ppm)).max() <= 1
+
+
+def test_the_largest_legal_edge_keeps_white_white(tmp_path: Path) -> None:
+    """Edge 128 is the last size whose DC coefficient fits int16 (255 * 128 <
+    32767); a white image survives it. Edge 256 is refused rather than
+    returned mid-grey."""
+    from conftest import write_ppm
+    from walsh.image import MAX_BLOCK_SIZE
+
+    assert MAX_BLOCK_SIZE == 128
+    source = write_ppm(tmp_path / "white.ppm", 256, 256, [(255, 255, 255)] * (256 * 256))
+    compressed, restored = tmp_path / "w.cim", tmp_path / "w.ppm"
+    task = Task(y_block_size=128, cb_block_size=128, cr_block_size=128)
+    task.with_action("compress").with_input(str(source)).with_output(str(compressed)).run()
+    Task().with_action("extract").with_input(str(compressed)).with_output(str(restored)).run()
+    assert _pixels(restored).min() >= 254
+
+    with pytest.raises(ValueError, match="at most 128"):
+        Task(y_block_size=256, cb_block_size=256, cr_block_size=256)

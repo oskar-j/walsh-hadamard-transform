@@ -1,7 +1,12 @@
-# Test and lint tooling. Equivalent to `pip install -e .[demo,dev]`.
+# Test, lint and build tooling: the `dev` dependency group in pyproject.toml,
+# plus the `demo` extra. Equivalent to `pip install -e ".[demo]" --group dev`
+# on pip 25.1 or newer; on older pip, install this file instead.
+# tests/test_requirements_mirror.py fails if it drifts from the group.
 
 -r requirements-demo.txt
 
 pytest>=8.0,<10
+pytest-cov>=5.0,<8
 ruff>=0.6,<1
 mypy>=1.10,<2
+build>=1.2,<2

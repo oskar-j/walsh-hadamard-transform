@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 import click
@@ -54,18 +55,25 @@ def _reject_writing_over_the_input(input_path: str, output_path: str) -> None:
         )
 
 
-def _run(task: Task) -> None:
-    """Run ``task``, turning expected failures into a clean CLI error.
+def _run(configure: Callable[[], Task]) -> None:
+    """Build and run a task, turning expected failures into a clean CLI error.
+
+    The task is built inside the guarded region, not passed in ready-made:
+    ``Task.__init__`` validates the block geometry (0.4.11, #21) and raises
+    ``ValueError`` for an edge that is not a power of two, one above the
+    container's ceiling, or a packed size the reader would refuse, and that
+    must surface as an ``Error:`` line rather than a traceback.
 
     Args:
-        task: A fully configured task, ready to run.
+        configure: Returns the fully configured task.
 
     Raises:
-        click.ClickException: if the task fails for a reason the user can act
-            on, such as a missing or malformed input file.
+        click.ClickException: If building or running the task fails for a
+            reason the user can act on, such as bad block sizes or a missing
+            or malformed input file.
     """
     try:
-        task.run()
+        configure().run()
     except EXPECTED_ERRORS as error:
         raise click.ClickException(str(error)) from error
 
@@ -155,17 +163,19 @@ def compress(
         click.UsageError: If OUTPUT names the same file as INPUT.
     """
     _reject_writing_over_the_input(input_path, output_path)
-    task = Task(
-        y_block_size=y_block_size,
-        cb_block_size=chroma_block_size,
-        cr_block_size=chroma_block_size,
-        packed_block_size=packed_block_size,
-    )
     _run(
-        task.with_coeff_removal(coeff_removal)
-        .with_action(Action.COMPRESS)
-        .with_input(input_path)
-        .with_output(output_path)
+        lambda: (
+            Task(
+                y_block_size=y_block_size,
+                cb_block_size=chroma_block_size,
+                cr_block_size=chroma_block_size,
+                packed_block_size=packed_block_size,
+            )
+            .with_coeff_removal(coeff_removal)
+            .with_action(Action.COMPRESS)
+            .with_input(input_path)
+            .with_output(output_path)
+        )
     )
 
 
@@ -189,7 +199,7 @@ def extract(input_path: str, output_path: str) -> None:
         click.UsageError: If OUTPUT names the same file as INPUT.
     """
     _reject_writing_over_the_input(input_path, output_path)
-    _run(Task().with_action(Action.EXTRACT).with_input(input_path).with_output(output_path))
+    _run(lambda: Task().with_action(Action.EXTRACT).with_input(input_path).with_output(output_path))
 
 
 if __name__ == "__main__":  # pragma: no cover

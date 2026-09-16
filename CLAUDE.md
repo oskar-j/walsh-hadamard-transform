@@ -34,7 +34,10 @@ The local `.venv` is Python 3.12. `walsh` is installed as a console script
 
 `cli.py` uses **click**, not argparse. `main` is a `click.group` with `compress`
 and `extract` subcommands, so tests drive it through `click.testing.CliRunner`
-rather than calling `main(argv)` — it no longer returns an int. The three
+rather than calling `main(argv)` — it no longer returns an int. The
+atomic-write regression test injects an `ENOSPC` into `_write_blocks` via
+`monkeypatch`: every header overflow that once served as a post-open failure
+is caught up front now, so do not look for a real input that fails mid-write. The three
 block-size options are `click.IntRange(min=1)` (0.4.7): zero once encoded a
 header-only file that decoded to solid green. Under `CliRunner` an uncaught
 exception lands in `result.exception` and is *not* printed, so a CLI test for
@@ -62,7 +65,15 @@ pytest puts `tests/` on `sys.path`.
 `with_output`, `with_coeff_removal`, then `run()`). Actions are the `Action`
 enum, dispatched through the `Task._ACTIONS` ClassVar; adding an action means
 adding a method *and* an entry there. Block sizes are constructor kwargs
-defaulting to the original values (Y 8, chroma 16, packed 4).
+defaulting to the original values (Y 8, chroma 16, packed 4), and
+`Task.__init__` validates them (0.4.11, #21): each edge a positive power of
+two no larger than `MAX_BLOCK_SIZE` (`COEFF_MAX // 255` = 128, above which an
+all-255 block's DC overflows `int16` and the clip on write silently halves
+it), and the packed size between 1 and the smallest edge. Packed need *not*
+be a power of two — 3 and 6 round-trip and are tested — and packed equal to
+the edge is legal. `CustomizableImage.set_data` mirrors the packed check on
+the write side. The CLI builds the `Task` inside `_run`'s guarded region for
+this reason: `_run` takes a factory, not a task.
 
 Between `load` and `save` everything is numpy, and since 0.4.10 (#27) so is
 the raster contract itself: `compress` reads `image.get_array().reshape(-1, 3)`
@@ -264,8 +275,17 @@ On a 2000×2000 image, `compress` takes about 1.0 s and 490 MB peak and
 What remains of the memory is the float64 working set of the transform (the
 YCbCr planes and the coefficient stacks at 8 bytes a sample), which is a
 different matter from the contract and would need a dtype decision, not more
-vectorisation. `tests/test_golden.py` pins the checked-in outputs byte for
-byte; run it first after any change on the pixel path.
+vectorisation. `tests/test_golden.py` pins the checked-in outputs; run it
+first after any change on the pixel path. **What "byte-identical" means here
+(0.4.11):** within one platform, byte for byte; across containers, byte for
+byte everywhere; the *decode* side, byte for byte everywhere (verified macOS
+against Linux). The *encode* side across BLAS implementations is exact to
+within one quantisation step: Accelerate and scipy-openblas round the matrix
+products differently in the last bit, and 2 of 60,000 coefficients of the
+sample land on an exact half and `np.rint` the other way. The golden test and
+the wheel smoke assert header identity, `|delta| <= 1`, and at most 0.1%
+differing. `data/transformed_earth.cim` is the reference and is un-ignored
+in `.gitignore` explicitly — it was silently absent from CI until 0.4.11.
 
 Multiprocessing was considered for the matrix build and rejected: the build
 takes about 0.1 ms at the codec's block sizes and runs once per process
@@ -281,6 +301,19 @@ numpy releases the GIL inside them.
   from the pre-port `data/recreated.bmp` by at most 2 per channel (mean 0.33).
 - **`_KWARGS_MARKER` in `decorators.py` must stay module level.** A per-call
   sentinel would make every cache lookup miss.
+
+## CI
+
+Every job installs with `uv sync --locked` and the release runs tests with
+`uv run --locked` (0.4.11, #25): a stale `uv.lock`, including one left behind
+by a version bump without `uv lock`, fails with uv's own message rather than
+being re-resolved in the runner. The `build` job also unpacks the sdist and
+runs its tests from inside, the only check that can catch a `MANIFEST.in`
+regression, and smoke-tests the wheel against the reference `.cim` for every
+container. A `force_publish` retry of the release downloads the assets on the
+existing GitHub Release rather than rebuilding, so PyPI gets the same bytes.
+`tests/test_requirements_mirror.py` keeps `requirements*.txt` equal to
+`pyproject.toml` (#24).
 
 ## Coverage gate
 
@@ -340,7 +373,11 @@ layer (#23), v0.4.6 made the container's 4.2 MP block-count ceiling an
 up-front, actionable error (#19), v0.4.7 made the `.cim` reader validate
 its header before allocating from it (#22), v0.4.8 added `.npy`, a bare NumPy
 array as an image, v0.4.9 fixed the CLI help and the stale docstrings (#28,
-#29), and v0.4.10 made the raster contract array-backed (#27), three times
-faster on large images with byte-identical output.
+#29), v0.4.10 made the raster contract array-backed (#27), three times
+faster on large images with byte-identical output, and v0.4.11 validated the
+block geometry (#21), fixed the requirements mirrors (#24), made CI verify
+the lock, the sdist and the release assets (#25), tracked the reference
+`.cim` that had been ignored all along, and stated byte identity across
+platforms precisely.
 Partially based on
 https://github.com/ktisha/python2012/tree/dee4beda8e22f3a66a3e31384d4b72ab66102e88/avereshchagin

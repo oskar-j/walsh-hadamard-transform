@@ -9,6 +9,94 @@ The `## [x.y.z]` headings are load-bearing: the release workflow extracts the
 section matching the version in `pyproject.toml` and uses it as the GitHub
 Release notes.
 
+## [0.4.11]
+
+Three issues and two findings made along the way. Codec output is unchanged
+on every platform; see the note on byte identity below for what that now
+means precisely.
+
+### Fixed
+
+- **Block geometry is validated once, in `Task.__init__`, before any file is
+  touched.** Closes #21. Three of the four failure modes were silent:
+  `--packed-block-size 16`, the flag the README tells users to raise, exited 0
+  and wrote a 960 KB file `extract` refuses forever, because numpy clamped the
+  crop to the whole block while the header recorded 16; `--packed-block-size
+  0` from the library exited 0 at both ends and returned a flat green image;
+  and a block edge of 256 saturated the `int16` coefficients so a white
+  picture came back mid-grey, again at exit 0. A library caller passing an
+  edge of 0 got a bare `ZeroDivisionError`, which is outside
+  `EXPECTED_ERRORS`. Now: each edge must be a positive power of two no larger
+  than `MAX_BLOCK_SIZE` (128, derived as `COEFF_MAX // 255`, the last edge
+  whose DC coefficient fits `int16`), and the packed size must lie between 1
+  and the smallest edge. The packed size is deliberately **not** required to
+  be a power of two, and 16/16/16 stays legal: both compress and extract
+  cleanly today and a test pins each. `CustomizableImage.set_data` mirrors
+  the reader's guard on the write side, which is the half that closes the
+  corruption path for callers that build a container directly. The CLI now
+  builds the `Task` inside its guarded region, so all of these are `Error:`
+  lines rather than tracebacks.
+
+- **The requirements mirrors say what `pyproject.toml` says.** Closes #24.
+  `requirements.txt` never gained `click` after 0.1.3 made it a runtime
+  dependency and `requirements-dev.txt` never gained `pytest-cov` or `build`,
+  so the documented non-uv setup could not run the coverage gate CI enforces.
+  Both are corrected, `tests/test_requirements_mirror.py` fails if they ever
+  drift again, and the README and CONTRIBUTING mention the `--group dev`
+  route pip 25.1 offers instead.
+
+- **CI verifies what it claims to.** Closes #25.
+  - `uv sync --locked` in every job, and `uv run --locked` in the release
+    workflow: a stale `uv.lock` is now a failure with uv's own message rather
+    than a silent re-resolve in the runner. Verified on a throwaway branch:
+    lint and all five test jobs fail at the install step.
+  - The `build` job unpacks the sdist and runs its own tests from inside,
+    which is what a downstream packager does and the only thing that can
+    catch a `MANIFEST.in` mistake, since the wheel is built from
+    `packages.find` and `twine check` never opens the payload. Verified on a
+    throwaway branch with `tests/conftest.py` dropped from the sdist: every
+    other check stays green and only this step fails, with the collection
+    errors. The release workflow runs the same step against the artifacts it
+    is about to publish.
+  - The wheel smoke test now compresses every sample container and checks
+    the result against the reference `.cim`, so packaging cannot silently
+    drop a format module.
+  - A forced `force_publish` retry downloads the assets attached to the
+    existing GitHub Release instead of rebuilding: setuptools output is not
+    reproducible, the build backend is unpinned, and a dispatched retry runs
+    on the branch tip while the release was pinned to a commit. Build, metadata
+    check and the sdist test are gated on the release not existing yet.
+
+### Notes
+
+- **The reference `.cim` was never actually checked in.** Every document since
+  0.3.1 called `data/transformed_earth.cim` the checked-in reference, and
+  0.4.10's golden test was written against it, but `.gitignore`'s `*.cim`
+  rule had kept it out of git the whole time. In CI the golden test skipped
+  45 of its 50 cases. The new sdist and smoke steps failed on its absence
+  within minutes, which is the whole point of #25. It is tracked now.
+- **Byte identity, stated precisely.** With the reference finally present in
+  CI, the compress side turned out not to be byte-identical *across BLAS
+  implementations*: on Linux with scipy-openblas, 2 of the 60,000
+  coefficients differ from the macOS Accelerate reference, each by exactly
+  one, where a coefficient lands on an exact half and `np.rint` rounds the
+  other way; the decoded picture differs in 44 pixels by one level. Within a
+  platform the output is byte-identical, across containers it is
+  byte-identical everywhere, and the decode side is byte-identical
+  everywhere too, verified by decoding the macOS reference on Linux. The
+  golden test and the smoke test now assert exactly that: header identical,
+  every coefficient within one, at most 0.1% differing. Deliberately shifting
+  100 coefficients or one coefficient by two is still rejected. A
+  BLAS-independent transform, the fast Walsh-Hadamard butterflies, would make
+  the encode side exact everywhere and is filed as #39.
+- The atomic-write regression test in `tests/test_cli.py` was re-pointed a
+  second time: every header-field overflow that served as its post-open
+  failure is now caught up front (#19, #22, #21), so it injects an `ENOSPC`
+  into the block writer after the header has gone out, which is the fault
+  the staged write exists to survive.
+- 391 to 410 tests, coverage 98.83% to 98.85%. Run locally on 3.10 through
+  3.14, and, for the first time with the reference present, in CI.
+
 ## [0.4.10]
 
 ### Changed

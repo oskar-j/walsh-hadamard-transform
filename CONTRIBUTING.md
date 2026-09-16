@@ -39,7 +39,9 @@ uv sync --group dev --all-extras
 and Pillow, which only `examples/roundtrip.py` needs. Note `dev` is a
 [PEP 735](https://peps.python.org/pep-0735/) dependency group and not an extra,
 so `pip install .[dev]` does not work; without uv, use
-`pip install -e ".[demo]" -r requirements-dev.txt`.
+`pip install -e ".[demo]" -r requirements-dev.txt`, or on pip 25.1 or newer
+`pip install -e ".[demo]" --group dev`. The requirements files mirror
+`pyproject.toml` and a test fails if they drift.
 
 ## Testing
 
@@ -52,6 +54,10 @@ uv run ruff format --check .
 uv run mypy
 ```
 
+* CI installs with `uv sync --locked`, so a change to `pyproject.toml` must
+  be committed together with the `uv.lock` that `uv lock` produces for it, and
+  a version bump too. The `build` job also unpacks the sdist and runs its
+  tests from inside, so `MANIFEST.in` must keep shipping `tests/conftest.py`.
 * Coverage must stay at or above 90%, measured with branch coverage on. CI
   enforces it on every supported Python version, so a pull request that drops
   below cannot be merged. It currently sits at ~98%, so there is headroom.

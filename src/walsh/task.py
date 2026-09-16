@@ -13,6 +13,7 @@ import numpy.typing as npt
 from walsh.colors import rgb_to_ycbcr, ycbcr_to_rgb
 from walsh.exceptions import UnsupportedFileFormatError
 from walsh.image import (
+    MAX_BLOCK_SIZE,
     MAX_BLOCKS_PER_CHANNEL,
     BlockDescription,
     CustomizableImage,
@@ -74,7 +75,20 @@ class Task:
             cr_block_size: Block edge used for the Cr channel.
             packed_block_size: How many low-frequency coefficients per axis are
                 kept when writing. This is the codec's lossy knob.
+
+        Raises:
+            ValueError: If a block edge is not a power of two, or exceeds
+                ``MAX_BLOCK_SIZE``, or the packed size is not between 1 and the
+                smallest block edge. Each of those used to fail late and
+                quietly: an edge of 0 died in the padding arithmetic with a
+                bare ``ZeroDivisionError``; an edge above the ceiling
+                saturated the ``int16`` coefficients so a white picture came
+                back mid-grey at exit 0; and a packed size above the edge was
+                clamped by numpy on write but recorded unclamped in the
+                header, producing a file the reader refuses forever, also at
+                exit 0. The packed size need not be a power of two.
         """
+        self._check_block_sizes(y_block_size, cb_block_size, cr_block_size, packed_block_size)
         self._input: FileSource = None
         self._output: FileSource = None
         self._action: Action | None = None
@@ -83,6 +97,34 @@ class Task:
         self._cb_block_size = cb_block_size
         self._cr_block_size = cr_block_size
         self._packed_block_size = packed_block_size
+
+    @staticmethod
+    def _check_block_sizes(y: int, cb: int, cr: int, packed: int) -> None:
+        """Reject block geometry the pipeline cannot honour, by name.
+
+        Args:
+            y: Luma block edge.
+            cb: Cb block edge.
+            cr: Cr block edge.
+            packed: Coefficients kept per axis.
+
+        Raises:
+            ValueError: See :meth:`__init__`.
+        """
+        for name, edge in (("y_block_size", y), ("cb_block_size", cb), ("cr_block_size", cr)):
+            if edge < 1 or edge & (edge - 1):
+                raise ValueError(f"{name} must be a positive power of two, got {edge}")
+            if edge > MAX_BLOCK_SIZE:
+                raise ValueError(
+                    f"{name} must be at most {MAX_BLOCK_SIZE}, got {edge}: above that a "
+                    f"block's coefficients overflow the .cim container's int16 fields"
+                )
+        smallest = min(y, cb, cr)
+        if packed < 1 or packed > smallest:
+            raise ValueError(
+                f"packed_block_size must be between 1 and the smallest block edge "
+                f"({smallest}), got {packed}"
+            )
 
     # -- configuration ---------------------------------------------------
 
