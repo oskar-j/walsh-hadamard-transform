@@ -214,8 +214,29 @@ division, so every entry is bit-identical to the pre-0.4.0 triple loop;
 `tests/test_transforms.py` keeps that loop as an oracle and asserts byte
 equality. Do not "simplify" to `h / np.sqrt(size)`.
 
-`transform` is `h @ src @ h` then, if `coeff` is set, zeroing coefficients below
-that magnitude. `inverse_transform` applies only the matrix — repeating the
+`transform` is mathematically `h @ src @ h` then, if `coeff` is set, zeroing
+coefficients below that magnitude. **Since 0.4.12 (#39) it is computed
+exactly**, in `_spectrum`: the input is snapped to a multiple of `2 ** -f`
+with `f = 36 - 2 * log2(n)`, multiplied on both sides by the `+-1` sign matrix
+(`_hadamard_signs`, memoised like `hadamard_matrix` and taking its row order
+from it), and scaled by `1 / n` last. Every one of those operations has an
+exactly representable result for samples below `2 ** 15` at any edge up to
+128, so the output is a function of the input bits alone: the same on every
+platform and BLAS library, with or without fused multiply-add, and an
+integer wherever the true value is an integer. Do not go back to
+multiplying by the orthonormal entries — `+-1/sqrt(n)` is irrational, every
+product rounds, and the rounding depends on the BLAS summation order, which
+is what made 0.4.11's outputs differ between Accelerate and openblas and,
+worse, made the inverse return `1.999999999999999` where the answer was `2`,
+which the colour conversion then truncated a level low. The grid constants
+`_SAMPLE_BITS` and `_MARGIN_BITS` are part of the codec's output: changing
+them moves the handful of coefficients that sit within `1e-9` of a half.
+A butterfly (fast Walsh-Hadamard transform) was measured for #39 and rejected
+for the runtime: in numpy it is about eight times slower than the matrix
+product at the codec's block sizes because every pass materialises
+temporaries. It lives on in `tests/test_transforms.py` as the oracle, since
+it adds the same samples in a completely different order and can only agree
+bit for bit with the matrix products when neither rounds anywhere. `inverse_transform` applies only the matrix — repeating the
 threshold would discard reconstructed detail twice, so the two are no longer
 the same call once `coeff` is set. Both accept a 3-D stack of blocks as well as
 one block, and `transform_sequence` / `inverse_transform_sequence` stack
@@ -275,17 +296,18 @@ On a 2000×2000 image, `compress` takes about 1.0 s and 490 MB peak and
 What remains of the memory is the float64 working set of the transform (the
 YCbCr planes and the coefficient stacks at 8 bytes a sample), which is a
 different matter from the contract and would need a dtype decision, not more
-vectorisation. `tests/test_golden.py` pins the checked-in outputs; run it
-first after any change on the pixel path. **What "byte-identical" means here
-(0.4.11):** within one platform, byte for byte; across containers, byte for
-byte everywhere; the *decode* side, byte for byte everywhere (verified macOS
-against Linux). The *encode* side across BLAS implementations is exact to
-within one quantisation step: Accelerate and scipy-openblas round the matrix
-products differently in the last bit, and 2 of 60,000 coefficients of the
-sample land on an exact half and `np.rint` the other way. The golden test and
-the wheel smoke assert header identity, `|delta| <= 1`, and at most 0.1%
-differing. `data/transformed_earth.cim` is the reference and is un-ignored
-in `.gitignore` explicitly — it was silently absent from CI until 0.4.11.
+vectorisation. `tests/test_golden.py` pins the checked-in outputs byte for byte; run it
+first after any change on the pixel path. **Byte-identical means exactly
+that since 0.4.12:** on every platform and BLAS library, in both directions,
+because the transform's arithmetic is exact (see `transforms.py` above).
+0.4.11 had measured a one-step difference in 2 of 60,000 coefficients
+between Accelerate and openblas and relaxed the checks to a tolerance; that
+machinery is gone and the CI wheel smoke compares with `cmp` on the Linux
+runner, which is the standing cross-platform proof. A deliberate change to
+the codec regenerates every `recreated.*` file and `transformed_earth.cim`
+in the same commit and states the change in the CHANGELOG.
+`data/transformed_earth.cim` is un-ignored in `.gitignore` explicitly — it
+was silently absent from CI until 0.4.11.
 
 Multiprocessing was considered for the matrix build and rejected: the build
 takes about 0.1 ms at the codec's block sizes and runs once per process
@@ -310,7 +332,7 @@ by a version bump without `uv lock`, fails with uv's own message rather than
 being re-resolved in the runner. The `build` job also unpacks the sdist and
 runs its tests from inside, the only check that can catch a `MANIFEST.in`
 regression, and smoke-tests the wheel against the reference `.cim` for every
-container. A `force_publish` retry of the release downloads the assets on the
+container and the reference decode, byte for byte. A `force_publish` retry of the release downloads the assets on the
 existing GitHub Release rather than rebuilding, so PyPI gets the same bytes.
 `tests/test_requirements_mirror.py` keeps `requirements*.txt` equal to
 `pyproject.toml` (#24).
@@ -378,6 +400,8 @@ faster on large images with byte-identical output, and v0.4.11 validated the
 block geometry (#21), fixed the requirements mirrors (#24), made CI verify
 the lock, the sdist and the release assets (#25), tracked the reference
 `.cim` that had been ignored all along, and stated byte identity across
-platforms precisely.
+platforms precisely. v0.4.12 made the transform's arithmetic exact (#39), so
+output is byte-identical on every platform and the decode no longer truncates
+a level low where the true value is an integer.
 Partially based on
 https://github.com/ktisha/python2012/tree/dee4beda8e22f3a66a3e31384d4b72ab66102e88/avereshchagin

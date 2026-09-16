@@ -108,22 +108,16 @@ jobs:
             exit 1
           fi
           test -s /tmp/smoke.cim
-          # The checked-in sample outputs are the codec's contract. Across BLAS
-          # implementations the encode side rounds differently in a handful of
-          # coefficients (2 of 60,000 between Accelerate and openblas, each by
-          # one), so this checks what tests/test_golden.py checks: header
-          # identical, every coefficient within one, almost none differing.
+          # The checked-in sample outputs are the codec's contract, and since
+          # 0.4.12 the transform's arithmetic is exact, so the bytes must match
+          # on this runner's openblas as they do under macOS Accelerate, where
+          # the reference was written. This is the cross-platform proof.
           for source in earth.ppm earth.pam earth.tiff earth.npy; do
             /tmp/smoke/bin/walsh compress "data/$source" /tmp/smoke-earth.cim
-            /tmp/smoke/bin/python - <<'PY'
-          import numpy as np
-          ref, got = open("data/transformed_earth.cim", "rb").read(), open("/tmp/smoke-earth.cim", "rb").read()
-          assert ref[:26] == got[:26] and len(ref) == len(got), "header or length differs"
-          a, b = (np.frombuffer(x[26:], dtype="<i2").astype(int) for x in (ref, got))
-          d = np.abs(a - b)
-          assert d.max() <= 1 and (d > 0).sum() <= 0.001 * len(a), f"{(d > 0).sum()} differ, max {d.max()}"
-          PY
+            cmp data/transformed_earth.cim /tmp/smoke-earth.cim
           done
+          /tmp/smoke/bin/walsh extract data/transformed_earth.cim /tmp/smoke-earth.ppm
+          cmp data/recreated.ppm /tmp/smoke-earth.ppm
           echo "wheel smoke test passed"
 
       # The wheel is built from [tool.setuptools.packages.find] and cannot

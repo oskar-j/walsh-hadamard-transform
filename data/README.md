@@ -5,8 +5,10 @@ excluded from the sdist and wheel (see `MANIFEST.in`), because at roughly half a
 megabyte each they would dominate the distribution, and the tests that use them
 skip when they are absent.
 
-Every `recreated.*` file is current output, regenerated whenever the codec
-changes. Reproduce any of them with:
+Every `recreated.*` file and `transformed_earth.cim` is current output,
+regenerated whenever the codec changes (last: 0.4.12, which made the
+transform's arithmetic exact, so these bytes are what the codec produces on
+every platform). Reproduce any of them with:
 
 ```
 walsh compress data/<source> /tmp/out.cim
