@@ -9,6 +9,49 @@ The `## [x.y.z]` headings are load-bearing: the release workflow extracts the
 section matching the version in `pyproject.toml` and uses it as the GitHub
 Release notes.
 
+## [0.4.12]
+
+### Changed
+
+- The Walsh-Hadamard transform's arithmetic is exact, so the codec's output is
+  byte-identical on every platform and BLAS library, in both directions
+  (#39). The input is snapped to a binary grid, multiplied by the `+-1` sign
+  matrix on both sides, and scaled by `1 / n` last; each step has an exactly
+  representable result for any sample the codec produces at any block edge it
+  accepts, so the platform's summation order cannot change a bit. Proven in
+  tests by bit equality against a butterfly transform, which adds the same
+  samples in an unrelated order, and against rational arithmetic; and in CI,
+  where the Linux runner's openblas must now reproduce the macOS reference
+  files with `cmp`.
+- **Output changes, both regenerated in this commit.** Encoding: 3 of 60,000
+  coefficients of the Blue Marble sample move by one, the half-way cases the
+  old arithmetic rounded by accident (one of them is the coefficient where
+  Linux already disagreed with the macOS reference in 0.4.11). Decoding: 1,228
+  of 480,000 samples move by one level, 1,196 of them up, because the
+  orthonormal matrix products returned `1.999999999999999` where the answer
+  was `2` and the colour conversion truncates. Every existing `.cim` still
+  decodes; about 0.25% of its samples come back one level higher, which is the
+  mathematically correct value. PSNR figures are unchanged to two decimals.
+- A butterfly transform was #39's proposal and was measured first: in numpy it
+  is about eight times slower than the matrix products at the codec's block
+  sizes, because every pass materialises temporaries. The exact matrix product
+  costs nothing measurable: 0.92 s compress and 1.06 s extract on a 2000x2000
+  image, against 1.00 s and 1.00 s before, within run-to-run noise.
+
+### Removed
+
+- The cross-platform tolerance added in 0.4.11 to `tests/test_golden.py` and
+  the wheel smoke (header identical, every coefficient within one, at most
+  0.1% differing). Both compare byte for byte again.
+
+### Notes
+
+- 410 to 426 tests, coverage 98.85% to 98.86%. Run locally on 3.10 through
+  3.14; the byte-for-byte checks pass on macOS Accelerate locally and on
+  Linux openblas in CI.
+- Follow-up filed: #41, a `Task(transform=...)` keyword so other block
+  transforms can reuse the pipeline for experiments.
+
 ## [0.4.11]
 
 Three issues and two findings made along the way. Codec output is unchanged

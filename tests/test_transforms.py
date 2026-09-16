@@ -117,9 +117,10 @@ def test_matrix_memo_does_not_pin_transform_instances() -> None:
     import gc
     import weakref
 
-    from walsh.transforms import hadamard_matrix
+    from walsh.transforms import _hadamard_signs, hadamard_matrix
 
     hadamard_matrix.cache_clear()
+    _hadamard_signs.cache_clear()
     transform = WalshHadamardTransform()
     reference = weakref.ref(transform)
     transform.transform(np.zeros((8, 8)))
@@ -131,6 +132,7 @@ def test_matrix_memo_does_not_pin_transform_instances() -> None:
     for _ in range(20):
         WalshHadamardTransform().transform(np.zeros((8, 8)))
     assert hadamard_matrix.cache_size() == 1, "cache grows with instance count"
+    assert _hadamard_signs.cache_size() == 1, "cache grows with instance count"
 
 
 def test_non_square_input_is_rejected(transform: WalshHadamardTransform) -> None:
@@ -255,3 +257,135 @@ def test_base_class_sequence_methods_stay_one_call_per_block() -> None:
     assert [s.tolist() for s in spectra] == [(-b).tolist() for b in blocks]
     restored = Negate().inverse_transform_sequence(spectra)
     assert [r.tolist() for r in restored] == [b.tolist() for b in blocks]
+
+
+# --- exact arithmetic (0.4.12, #39) -----------------------------------------
+
+
+def _on_a_coarse_grid(rng: np.random.Generator, shape: tuple[int, ...], scale: float) -> np.ndarray:
+    """Samples that are multiples of 1/1024, so the transform's snap is a no-op
+    and the oracles below can be fed the very same bits."""
+    return rng.integers(0, int(scale * 1024), size=shape).astype(np.float64) / 1024.0
+
+
+def _natural_index_of_sequency_row(size: int) -> np.ndarray:
+    """For each sequency-ordered row, its index in Sylvester's natural order."""
+    natural = np.ones((1, 1))
+    for _ in range(size.bit_length() - 1):
+        natural = np.kron(np.array([[1.0, 1.0], [1.0, -1.0]]), natural)
+    signs = np.sign(hadamard_matrix(size))
+    return np.array([int(np.flatnonzero((natural == row).all(axis=1))[0]) for row in signs])
+
+
+def _butterfly_spectrum(blocks: np.ndarray) -> np.ndarray:
+    """The fast Walsh-Hadamard transform: the butterfly #39 proposed, as the oracle.
+
+    It adds the same samples in a completely different order from the two
+    matrix products, so bit equality between the two is possible only when
+    neither of them rounds anywhere.
+    """
+    x = np.asarray(blocks, dtype=np.float64)
+    size = x.shape[-1]
+    for axis in (-2, -1):
+        moved = np.moveaxis(x, axis, -1)
+        y = moved.reshape(-1, size)
+        half = 1
+        while half < size:
+            y = y.reshape(-1, size // (2 * half), 2, half)
+            y = np.concatenate([y[:, :, 0] + y[:, :, 1], y[:, :, 0] - y[:, :, 1]], axis=-1)
+            y = y.reshape(-1, size)
+            half *= 2
+        x = np.moveaxis(y.reshape(moved.shape), -1, axis)
+    order = _natural_index_of_sequency_row(size)
+    return x[..., order, :][..., :, order] / size
+
+
+@pytest.mark.parametrize("size", [1, 2, 4, 8, 16, 32, 128])
+def test_transform_is_bit_identical_to_a_butterfly_in_a_different_order(size: int) -> None:
+    """The exactness claim, tested the only way it can be: two unrelated
+    operation orders must agree to the last bit, on pixels and on the full
+    int16 coefficient range at the largest block the container accepts."""
+    rng = np.random.default_rng(seed=size)
+    transform = WalshHadamardTransform()
+    pixels = _on_a_coarse_grid(rng, (6, size, size), 256.0)
+    np.testing.assert_array_equal(transform.transform(pixels), _butterfly_spectrum(pixels))
+
+    coefficients = rng.integers(-32768, 32768, size=(6, size, size)).astype(np.float64)
+    np.testing.assert_array_equal(
+        transform.inverse_transform(coefficients), _butterfly_spectrum(coefficients)
+    )
+
+
+def test_transform_matches_exact_rational_arithmetic() -> None:
+    from fractions import Fraction
+
+    rng = np.random.default_rng(seed=23)
+    block = _on_a_coarse_grid(rng, (8, 8), 256.0)
+    signs = [[int(v) for v in row] for row in np.sign(hadamard_matrix(8))]
+    exact = [
+        [
+            float(
+                sum(
+                    signs[i][k] * Fraction(block[k, m]) * signs[m][j]
+                    for k in range(8)
+                    for m in range(8)
+                )
+                / 8
+            )
+            for j in range(8)
+        ]
+        for i in range(8)
+    ]
+    np.testing.assert_array_equal(WalshHadamardTransform().transform(block), np.array(exact))
+
+
+def test_integer_results_come_out_as_exact_integers() -> None:
+    """A DC of 16 at edge 8 is a flat block of exactly 2, not 1.999999999999999.
+
+    That last bit is the whole point on the way back: the colour conversion
+    truncates, so the orthonormal matrix products lost a level in about 0.25%
+    of the samples of every decoded picture before 0.4.12.
+    """
+    transform = WalshHadamardTransform()
+    spectrum = np.zeros((8, 8))
+    spectrum[0, 0] = 16.0
+    restored = transform.inverse_transform(spectrum)
+    assert restored.tobytes() == np.full((8, 8), 2.0).tobytes()
+
+    forward = transform.transform(np.full((8, 8), 2.0))
+    assert forward.tobytes() == spectrum.tobytes()
+
+
+def test_input_is_snapped_to_a_grid_that_is_part_of_the_contract() -> None:
+    """Arbitrary doubles are rounded to a multiple of 2**-30 at edge 8 before
+    anything else, so the result is the same as for the snapped input, and the
+    snap itself is far below anything the codec's rounding can see."""
+    rng = np.random.default_rng(seed=29)
+    transform = WalshHadamardTransform()
+    block = rng.uniform(0, 255, size=(8, 8))
+    snapped = np.rint(block * 2.0**30) / 2.0**30
+    assert not np.array_equal(block, snapped)
+    np.testing.assert_array_equal(transform.transform(block), transform.transform(snapped))
+
+    orthonormal = hadamard_matrix(8) @ block @ hadamard_matrix(8)
+    np.testing.assert_allclose(transform.transform(block), orthonormal, atol=1e-7, rtol=0)
+
+
+@pytest.mark.parametrize(
+    ("size", "fraction_bits"), [(1, 36), (2, 34), (8, 30), (16, 28), (128, 22)]
+)
+def test_grid_leaves_room_for_the_largest_possible_sum(size: int, fraction_bits: int) -> None:
+    """53 significand bits, less 2 of margin, 15 for the sample magnitude and
+    two per doubling of the edge for the n*n-term sums."""
+    from walsh.transforms import _grid_scale
+
+    assert _grid_scale(size) == 2.0**fraction_bits
+
+
+def test_sign_matrix_shares_the_orthonormal_matrix_row_order() -> None:
+    from walsh.transforms import _hadamard_signs
+
+    signs = _hadamard_signs(16)
+    assert set(np.unique(signs)) == {-1.0, 1.0}
+    np.testing.assert_array_equal(signs, np.sign(hadamard_matrix(16)))
+    assert _hadamard_signs(16) is signs, "memoised, like hadamard_matrix"

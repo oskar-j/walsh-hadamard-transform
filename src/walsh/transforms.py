@@ -1,4 +1,10 @@
-"""The Walsh-Hadamard transform itself."""
+"""The Walsh-Hadamard transform itself.
+
+Since 0.4.12 the transform is *exact*: every floating-point operation it
+performs has an exactly representable result, so its output is a function of
+its input bits alone and is identical on every platform and BLAS library. See
+:meth:`WalshHadamardTransform._spectrum` for how, and #39 for why.
+"""
 
 from __future__ import annotations
 
@@ -117,6 +123,16 @@ class WalshHadamardTransform(Transform):
     Without ``coeff`` the transform is symmetric and involutive, so
     :meth:`inverse_transform` is :meth:`transform` applied again.
 
+    The arithmetic is exact (0.4.12, #39): the input is snapped to a binary
+    grid, multiplied by the ``+-1`` sign matrix on both sides, and scaled by
+    ``1 / n`` at the end. Each of those steps is exact in IEEE double for
+    samples of magnitude below ``2 ** 15`` at any block edge the codec accepts,
+    so the result does not depend on the order in which the platform's BLAS
+    sums the products. The output is therefore bit-identical everywhere, and
+    a coefficient whose true value is an integer comes out as exactly that
+    integer -- which matters on the way back, where the colour conversion
+    truncates and ``1.999999999999999`` is a level lower than ``2.0``.
+
     Both accept a single square block or a 3-D stack of them, and the
     sequence methods use that to push every block of an image through one
     broadcast matrix product instead of one Python call each.
@@ -234,15 +250,36 @@ class WalshHadamardTransform(Transform):
 
     @staticmethod
     def _spectrum(src: Block) -> Block:
-        """Apply the matrix on both sides of ``src``.
+        """Apply the matrix on both sides of ``src``, exactly.
+
+        Mathematically this is ``h @ src @ h`` for the orthonormal matrix of
+        the block edge. It is computed as ``(s @ snap(src) @ s) / n`` with
+        ``s`` the ``+-1`` sign matrix, and that form is exact:
+
+        * ``snap`` rounds every sample to a multiple of ``2 ** -f`` with
+          ``f = 36 - 2 * log2(n)``, chosen so that a sum of ``n * n`` samples
+          of magnitude below ``2 ** 15`` still fits in the 53 significand
+          bits of a double, with two bits to spare. Rounding to and from a
+          power of two is itself exact.
+        * A product with ``+-1`` is exact, and every partial sum of the two
+          matrix products is a sum of grid values within that bound, so it is
+          exact whatever order the BLAS adds them in, with or without fused
+          multiply-add.
+        * ``1 / n`` is a power of two, so the final scale is exact.
+
+        So the result is the exact rational transform of the snapped input,
+        identical on every platform. The orthonormal entries ``+-1/sqrt(n)``
+        are irrational and must not be used here: multiplying by them rounds
+        at every step, and the rounding depends on the summation order.
 
         Args:
             src: A square 2-D array, or a 3-D stack of them along the first
-                axis.
+                axis. Samples of magnitude ``2 ** 15`` or more are still
+                transformed, but the exactness guarantee stops there.
 
         Returns:
-            ``h @ src @ h`` for the matrix of the block edge, the same shape
-            as ``src``. For a stack, ``@`` broadcasts over the leading axis.
+            The spectrum, the same shape as ``src``. For a stack, ``@``
+            broadcasts over the leading axis.
 
         Raises:
             ValueError: If ``src`` is not a square block or a stack of them.
@@ -251,8 +288,56 @@ class WalshHadamardTransform(Transform):
         if src.ndim not in (2, 3) or src.shape[-1] != src.shape[-2]:
             raise ValueError(f"expected a square block or a stack of them, got shape {src.shape}")
 
-        h = hadamard_matrix(src.shape[-1])
-        return h @ src @ h
+        size = src.shape[-1]
+        signs = _hadamard_signs(size)
+        grid = _grid_scale(size)
+        snapped: Block = np.rint(src * grid) / grid
+        spectrum: Block = (signs @ snapped @ signs) * (1.0 / size)
+        return spectrum
+
+
+#: Magnitude bound, as a power of two, on the samples the exactness guarantee
+#: covers: pixels are below ``2 ** 8`` and ``.cim`` coefficients below
+#: ``2 ** 15``.
+_SAMPLE_BITS = 15
+
+#: Bits of the 53-bit double significand kept in reserve beyond the bound.
+_MARGIN_BITS = 2
+
+
+def _grid_scale(size: int) -> float:
+    """Return ``2 ** f``, the reciprocal of the snapping grid for ``size``.
+
+    A sum of ``size * size`` samples below ``2 ** _SAMPLE_BITS``, each a
+    multiple of ``2 ** -f``, is below ``2 ** (_SAMPLE_BITS + 2 * log2(size))``
+    and must be representable in 53 bits: ``f`` is what is left.
+
+    Args:
+        size: Edge length of the block. Must be a power of two.
+
+    Returns:
+        The scale as a float, exactly a power of two.
+    """
+    log2_size = size.bit_length() - 1
+    fraction_bits = 53 - _MARGIN_BITS - _SAMPLE_BITS - 2 * log2_size
+    return float(2**fraction_bits)
+
+
+@cached
+def _hadamard_signs(size: int) -> Block:
+    """Return the ``+-1`` matrix with the rows of :func:`hadamard_matrix`.
+
+    Memoised for the same reason and in the same way as
+    :func:`hadamard_matrix`, from which it takes its row order.
+
+    Args:
+        size: Edge length of the matrix. Must be a power of two.
+
+    Returns:
+        The ``size`` by ``size`` matrix of ``+1.0`` and ``-1.0``, rows in
+        sequency order.
+    """
+    return np.sign(hadamard_matrix(size)).astype(np.float64)
 
 
 def _apply_batched(apply: Callable[[Block], Block], src_seq: Iterable[Block]) -> list[Block]:
