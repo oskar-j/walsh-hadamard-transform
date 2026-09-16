@@ -509,3 +509,18 @@ def test_set_data_accepts_a_stack_as_well_as_a_list(tmp_path: Path) -> None:
         image.save(str(tmp_path / f"{id(image)}.cim"))
     outputs = sorted(tmp_path.glob("*.cim"))
     assert outputs[0].read_bytes() == outputs[1].read_bytes()
+
+
+def test_set_data_rejects_a_block_smaller_than_its_packed_size() -> None:
+    """The write-side mirror of the reader's packed > original guard. numpy
+    would clamp the crop to the whole block while the header said 16, and
+    every reader in this package would then refuse the file."""
+    image = CustomizableImage()
+    image.set_dimensions(8, 8)
+    description = BlockDescription(8, 16, 1)
+    image.set_descriptions(description, description, description)
+    block = [np.ones((8, 8))]
+    with pytest.raises(
+        ValueError, match=r"y block of shape \(8, 8\) is smaller than the packed size 16"
+    ):
+        image.set_data(block, block, block)

@@ -218,31 +218,29 @@ def test_a_different_output_file_is_still_allowed(
 
 
 def test_a_failed_compress_leaves_the_existing_output_intact(
-    runner: CliRunner, gradient_bmp: Path, tmp_path: Path
+    runner: CliRunner, gradient_bmp: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A packed block size too large for its own `<H>` header field.
+    """A failure after `save()` has opened the destination must not replace it.
 
-    The point is a failure that happens *after* `save()` has opened the
-    destination, which is what the staged write in `_io` exists to survive.
-    This used the .cim block-count overflow until 0.4.6, when that moved to an
-    up-front check in `Task` and stopped reaching the writer at all -- the
-    assertion below caught that. If a future release validates the packed block
-    size up front too, this needs re-pointing at another post-open failure
-    rather than deleting.
+    That is what the staged write in `_io` exists to survive: ENOSPC, EIO, a
+    crash mid-write. Every header-field overflow that used to serve as the
+    example here is now caught before the file is opened (#19 in 0.4.6, #22 in
+    0.4.7, #21 in 0.4.11), so the failure is injected where such a fault would
+    land, in the block writer, after the header has gone out.
     """
+    from walsh.image import CustomizableImage
+
+    def fail_mid_write(*args: object, **kwargs: object) -> None:
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(CustomizableImage, "_write_blocks", fail_mid_write)
     output = tmp_path / "archive.cim"
     output.write_bytes(b"PREVIOUS ENCODE")
 
-    result = runner.invoke(
-        main,
-        ["compress", "--packed-block-size", "70000", str(gradient_bmp), str(output)],
-    )
+    result = runner.invoke(main, ["compress", str(gradient_bmp), str(output)])
 
     assert result.exit_code == 1, result.output
-    # Not the full message: CPython words this differently per version, "'H'
-    # format requires ... 65535" on 3.11+ and "ushort format requires ..." on
-    # 3.10. This much pins the failure to the struct pack in _write_header.
-    assert "format requires" in result.output
+    assert "No space left on device" in result.output
     assert output.read_bytes() == b"PREVIOUS ENCODE"
     assert not [p for p in tmp_path.iterdir() if p.name.startswith(".walsh-")]
 
@@ -358,3 +356,22 @@ def test_coeff_removal_help_describes_what_the_code_does(runner: CliRunner) -> N
     assert "strictly below" in output
     assert "block size" in output
     assert "matrix" not in output
+
+
+@pytest.mark.parametrize(
+    ("options", "match"),
+    [
+        (["--packed-block-size", "16"], "smallest block edge"),
+        (["--y-block-size", "6"], "positive power of two"),
+        (["--y-block-size", "256", "--chroma-block-size", "256"], "at most 128"),
+    ],
+)
+def test_bad_block_geometry_is_a_clean_error_that_writes_nothing(
+    runner: CliRunner, gradient_bmp: Path, tmp_path: Path, options: list[str], match: str
+) -> None:
+    """--packed-block-size 16 used to exit 0 and write a file extract refuses forever."""
+    output = tmp_path / "o.cim"
+    result = runner.invoke(main, ["compress", *options, str(gradient_bmp), str(output)])
+    assert result.exit_code == 1, result.output
+    assert "Error:" in result.output and match in result.output
+    assert not output.exists()
