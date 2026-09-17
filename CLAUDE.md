@@ -75,11 +75,27 @@ the edge is legal. `CustomizableImage.set_data` mirrors the packed check on
 the write side. The CLI builds the `Task` inside `_run`'s guarded region for
 this reason: `_run` takes a factory, not a task.
 
+`Task(transform=...)` (0.4.13, #41) takes a `Transform` **instance**, default
+`WalshHadamardTransform()`, used by both directions; anything else is a
+`TypeError` at construction. It is for experiments — a DCT or Haar through the
+same pipeline — and is **library only on purpose**: the `.cim` does not record
+its transform, so a file written with a custom one decodes under the default
+without complaint into a degraded picture (pinned by
+`test_a_cim_does_not_record_its_transform`). Do not add a CLI option for it
+without first giving the container a way to say which transform wrote it,
+which is a format change. Task calls `transform_stack` /
+`inverse_transform_stack`, never `transform` on a stack, because a subclass
+only promises single blocks; it checks the returned shape and names the
+class. Coefficient removal is applied by Task after the transform
+(`remove_small_coefficients`, shared with `WalshHadamardTransform(coeff=...)`
+so the two cannot drift), which is what makes it work for any transform, and
+`with_coeff_removal` rejects a negative value when it is set.
+
 Between `load` and `save` everything is numpy, and since 0.4.10 (#27) so is
 the raster contract itself: `compress` reads `image.get_array().reshape(-1, 3)`
 and `extract` ends in `image.set_array(...)`, with no list of tuples anywhere.
-`_slice` returns the `(count, edge, edge)` stack it builds, `Task` calls
-`transform.transform(stack)` directly (it has taken a stack since 0.4.0), and
+`_slice` returns the `(count, edge, edge)` stack it builds, `Task` hands it
+to `transform_stack` whole (the built-in has taken a stack since 0.4.0), and
 `_merge` takes the stack back through `np.asarray`, free for an array and a
 stack for a list. `_merge` derives its row count from the declared height,
 never from `len(blocks)`, and raises `ValueError` on a count that cannot tile
@@ -242,7 +258,13 @@ the same call once `coeff` is set. Both accept a 3-D stack of blocks as well as
 one block, and `transform_sequence` / `inverse_transform_sequence` stack
 uniformly shaped blocks into one broadcast call, falling back to one call per
 block only for mixed shapes. The `Transform` base class keeps the per-block
-defaults for subclasses that know nothing of stacks.
+defaults for subclasses that know nothing of stacks, and the same goes for
+`transform_stack` / `inverse_transform_stack` (0.4.13): the base loops over
+blocks through `_per_block`, which compares shapes explicitly because
+assignment would broadcast a scalar over a block, and `WalshHadamardTransform`
+overrides both with its one broadcast product. That override is what keeps the
+built-in path vectorised; `examples/compare_transforms.py` shows a subclass
+doing the same, and `tests/test_custom_transform.py` runs that example.
 
 **`colors.py`** — RGB ↔ YCbCr conversion. `rgb_to_ycbcr` and `ycbcr_to_rgb`
 are the implementation and take whole `(n, 3)` arrays; the `ColorModel` classes
@@ -402,6 +424,8 @@ the lock, the sdist and the release assets (#25), tracked the reference
 `.cim` that had been ignored all along, and stated byte identity across
 platforms precisely. v0.4.12 made the transform's arithmetic exact (#39), so
 output is byte-identical on every platform and the decode no longer truncates
-a level low where the true value is an integer.
+a level low where the true value is an integer. v0.4.13 added
+`Task(transform=...)` (#41) so other block transforms can reuse the pipeline
+for experiments.
 Partially based on
 https://github.com/ktisha/python2012/tree/dee4beda8e22f3a66a3e31384d4b72ab66102e88/avereshchagin
