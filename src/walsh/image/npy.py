@@ -19,10 +19,14 @@ permutation, and transparency can only be flattened by inventing a background.
 Channel order is RGB by definition: a BGR array, as OpenCV produces, is one
 expression away, ``array[..., ::-1]``.
 
-The header is validated before a byte of the body is read, and pickled object
-arrays are refused from the header alone and never loaded. The writer always
-produces ``(height, width, 3)`` ``uint8`` in C order, so a file written here
-round-trips through ``numpy.load`` unchanged.
+The header is validated before a byte of the body is read. An ``object``
+array, which NumPy stores as a pickle inside the ``.npy`` and only
+``numpy.load(allow_pickle=True)`` will open, is read since 0.4.15 through the
+allowlisted unpickler of :mod:`walsh.image.pkl`, so nothing in it is executed
+and ``numpy.load`` is still never called with pickling enabled; what it holds
+is then judged as a pickle of pixels would be. The writer always produces
+``(height, width, 3)`` ``uint8`` in C order, so a file written here round-trips
+through ``numpy.load`` unchanged.
 """
 
 from __future__ import annotations
@@ -34,23 +38,24 @@ from typing import BinaryIO, Literal
 import numpy as np
 
 from walsh.exceptions import UnsupportedFileFormatError
+from walsh.image._arrays import IMAGE_DTYPE, RGB_CHANNELS, to_rgb, validate_image_array
 from walsh.image._io import FileSource, open_binary_read, open_binary_write, read_up_to
 from walsh.image.base import RasterImage
+from walsh.image.pkl import pixels_from_object, safe_loads
 
 __all__ = ["NPY_CHANNELS", "NPY_DTYPE", "NPYImage"]
 
 log = logging.getLogger(__name__)
 
 #: The one sample type accepted and the one written.
-NPY_DTYPE = np.dtype(np.uint8)
+NPY_DTYPE = IMAGE_DTYPE
 
 #: Channels in the one shape the writer produces.
-NPY_CHANNELS = 3
+NPY_CHANNELS = RGB_CHANNELS
 
-#: Channel counts the reader accepts, and how each is brought to RGB.
-_GREY = 1
-_RGBA = 4
-_OPAQUE = 255
+#: What this format is called in a message.
+_LABEL = ".npy"
+_OBJECT_LABEL = ".npy object array"
 
 #: Header versions this reader parses. NumPy writes 1.0 for any plain array
 #: and 2.0 only for a header over 64 KiB; 3.0 exists for non-latin-1 field
@@ -105,39 +110,20 @@ class NPYImage(RasterImage):
         """Reject, by name, anything but an 8-bit image-shaped array.
 
         Runs on the header alone, before the body is read, so a file whose
-        header declares a huge or hostile array costs nothing to refuse.
+        header declares a huge or hostile array costs nothing to refuse. The
+        rules are :func:`~walsh.image._arrays.validate_image_array`'s, shared
+        with the pickle reader.
 
         Args:
             shape: The declared shape.
             dtype: The declared dtype.
 
         Raises:
-            UnsupportedFileFormatError: If the dtype is not ``uint8`` --
-                including ``object``, which is how a pickled array presents
-                and which is never loaded -- or the shape is not
-                ``(height, width)`` or ``(height, width, channels)`` with
-                positive dimensions and 1, 3 or 4 channels.
+            UnsupportedFileFormatError: If the dtype is not ``uint8`` or the
+                shape is not ``(height, width)`` or ``(height, width,
+                channels)`` with positive dimensions and 1, 3 or 4 channels.
         """
-        if dtype != NPY_DTYPE:
-            raise UnsupportedFileFormatError(
-                f"unsupported .npy dtype {dtype}: expected uint8 samples in 0-255"
-            )
-        if len(shape) not in (2, 3):
-            raise UnsupportedFileFormatError(
-                f"unsupported .npy shape {shape}: expected (height, width) or "
-                f"(height, width, channels)"
-            )
-        height, width = shape[0], shape[1]
-        if height < 1 or width < 1:
-            raise UnsupportedFileFormatError(
-                f"invalid .npy shape {shape}: dimensions must be positive"
-            )
-        channels = shape[2] if len(shape) == 3 else _GREY
-        if channels not in (_GREY, NPY_CHANNELS, _RGBA):
-            raise UnsupportedFileFormatError(
-                f"unsupported .npy shape {shape}: {channels} channels; expected 1 "
-                f"(greyscale), 3 (RGB) or 4 (RGBA)"
-            )
+        validate_image_array(shape, dtype, _LABEL)
 
     @staticmethod
     def _to_rgb(array: np.ndarray) -> np.ndarray:
@@ -151,24 +137,31 @@ class NPYImage(RasterImage):
 
         Raises:
             UnsupportedFileFormatError: If a four-channel array is not fully
-                opaque. That is either transparency, which cannot be dropped
-                without inventing a background, or CMYK, which the shape alone
-                cannot tell apart from RGBA and which is not a permutation of
-                RGB.
+                opaque; see :func:`~walsh.image._arrays.to_rgb`.
         """
-        if array.ndim == 2:
-            array = array[:, :, np.newaxis]
-        if array.shape[2] == _GREY:
-            array = np.repeat(array, NPY_CHANNELS, axis=2)
-        elif array.shape[2] == _RGBA:
-            if int(array[:, :, 3].min()) < _OPAQUE:
-                raise UnsupportedFileFormatError(
-                    "unsupported .npy pixels: the fourth channel is not fully opaque; "
-                    "RGBA with transparency and CMYK are not supported, only RGBA "
-                    "whose alpha is 255 throughout"
-                )
-            array = array[:, :, :NPY_CHANNELS]
-        return np.ascontiguousarray(array)
+        return to_rgb(array, _LABEL)
+
+    def _load_object_array(self, file: BinaryIO, shape: tuple[int, ...]) -> None:
+        """Read the pickled body of an ``object`` array, executing nothing.
+
+        Args:
+            file: Stream positioned just after the header.
+            shape: The shape the header declared.
+
+        Raises:
+            UnsupportedFileFormatError: If the body is not a pickle the
+                allowlisted unpickler reads, does not hold an array of the
+                declared shape, or that array does not hold an image.
+        """
+        # A pickle's length is not declared anywhere, so this is the rest of
+        # the file, whose size is its own.
+        loaded = safe_loads(file.read(), _OBJECT_LABEL)
+        if not isinstance(loaded, np.ndarray) or loaded.shape != shape:
+            raise UnsupportedFileFormatError(
+                f"invalid {_OBJECT_LABEL}: the body does not hold an array of the "
+                f"declared shape {shape}"
+            )
+        self.set_array(pixels_from_object(loaded, self._declared_size, _OBJECT_LABEL))
 
     def load(self, filename: FileSource) -> None:
         """Read a ``.npy`` from ``filename``, replacing any current contents.
@@ -179,13 +172,18 @@ class NPYImage(RasterImage):
 
         Raises:
             UnsupportedFileFormatError: If the file is not a ``.npy``, its
-                header describes anything but an 8-bit image-shaped array, its
-                body is shorter than the header declares, or a four-channel
-                array is not fully opaque.
+                header describes anything but an 8-bit image-shaped array or
+                an ``object`` array holding pixels, its body is shorter than
+                the header declares, or a four-channel array is not fully
+                opaque.
             OSError: If the file cannot be read.
         """
         with open_binary_read(filename) as file:
             shape, fortran_order, dtype = self._read_header(file)
+            if dtype.hasobject:
+                self._load_object_array(file, shape)
+                log.debug("loaded .npy object array from %s", filename)
+                return
             self._validate(shape, dtype)
             expected = math.prod(shape) * NPY_DTYPE.itemsize
             # Sized from a header field, so never asked for in one call.

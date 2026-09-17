@@ -138,14 +138,49 @@ non-opaque fourth channel is either transparency (flattening invents a
 background) or CMYK (a colour-space conversion, undefined without a profile,
 and indistinguishable from RGBA by shape). Everything else is rejected by
 name. The header is parsed with `np.lib.format.read_magic` /
-`read_array_header_1_0` and validated **before** the body is read; a pickled
-`object` array is refused from the header dtype and `np.load` is never called
-with pickling enabled. Versions 1.0 and 2.0 are accepted; 3.0 exists only for
+`read_array_header_1_0` and validated **before** the body is read. `np.load`
+is never called with pickling enabled; an `object` array, whose body is a
+pickle, goes through `pkl.safe_loads` since 0.4.15 and is then judged as a
+pickle of pixels would be. The array rules themselves live in `_arrays.py`
+(`validate_image_array`, `to_rgb`), shared with the pickle reader, and take a
+label so each format's messages name it. Versions 1.0 and 2.0 are accepted; 3.0 exists only for
 structured dtypes and is rejected by name. The writer is `np.save` of a
 C-ordered `(h, w, 3)` `uint8` through the staged `open_binary_write`, so its
 bytes are deterministic and byte-identical to `np.save` of the same array —
 `data/earth.npy` was written by numpy from Pillow's array and the writer
 reproduces it exactly, which is the foreign-writer check.
+
+`pkl.py` (0.4.15) reads `.pkl` / `.pickle`: a pickled NumPy array, rows of
+`(r, g, b)` pixels, a flat list of them, or the `{"width", "height",
+"pixels"}` dict around any of those. **It must never call `pickle.load`,
+`pickle.loads` or `np.load(allow_pickle=True)`**: those execute the file.
+`safe_loads` unpickles through `_RestrictedUnpickler`, whose `find_class`
+resolves names from the `_ALLOWED` table and nowhere else, importing nothing:
+NumPy's `_reconstruct`, `_frombuffer` and `scalar` under both the `numpy.core`
+(NumPy 1) and `numpy._core` (NumPy 2) spellings, `numpy.dtype`, and
+`_codecs.encode` for protocols 0-2. Three deliberate details. `numpy.ndarray`
+resolves to an inert token, not the class, because pickles only pass it as an
+argument and the class would let a file call `ndarray(shape)` and allocate
+anything; `_reconstruct` is wrapped to accept only that token with shape
+`(0,)`, which is all NumPy writes; and the real functions are taken from what
+NumPy itself emits (`np.zeros(1).__reduce__()[0]`), so no private module path
+is imported. Widening the allowlist is a security decision: an entry must be
+unable to import, open, or allocate from its arguments. `MemoryError` is
+re-raised, not converted, for the reason given under `EXPECTED_ERRORS`. A
+flat list has no dimensions and nothing guesses them (160,000 pixels are
+400x400 or 200x800): the size comes from the dict or from
+`RasterImage.declare_size`, which `Task.with_input_size` and the CLI's
+`--width` / `--height` feed. `Task` verifies a declared size against every
+format after `load`, so it is honoured or verified, never dropped, and
+rejects one on `extract`. Lists are flattened with `itertools.chain` into
+`np.fromiter`, per the rule above, through `_Reiterable` because the samples
+are walked twice (types, then values) and a bare `chain` is one-shot; that
+was a real bug during development, caught by mypy's complaint about the type.
+Samples must be `int` or `np.integer`, never `bool` or float, and in 0-255,
+checked before the cast so nothing wraps. The writer emits rows of tuples of
+plain `int` at protocol 4: loadable without NumPy, and byte-stable across
+NumPy versions, which a pickled array is not. `data/earth.pkl` is a pickled
+array written under NumPy 2 and is in the golden test and the CI `cmp` loop.
 
 `_netpbm.py` holds what PPM and PAM share, since their rasters are identical
 behind different headers: the one-byte sample decoder (one read, a lookup-table
@@ -374,7 +409,10 @@ regression, and smoke-tests the wheel against the reference `.cim` for every
 container and the reference decode, byte for byte. A `force_publish` retry of the release downloads the assets on the
 existing GitHub Release rather than rebuilding, so PyPI gets the same bytes.
 `tests/test_requirements_mirror.py` keeps `requirements*.txt` equal to
-`pyproject.toml` (#24).
+`pyproject.toml` (#24), and `tests/test_readme_toc.py` keeps the README's
+table of contents equal to its headings: after renaming or adding a heading,
+run `python tests/test_readme_toc.py` to regenerate the block between the
+`<!-- toc -->` markers.
 
 ## Coverage gate
 
@@ -443,7 +481,9 @@ platforms precisely. v0.4.12 made the transform's arithmetic exact (#39), so
 output is byte-identical on every platform and the decode no longer truncates
 a level low where the true value is an integer. v0.4.13 added
 `Task(transform=...)` (#41) so other block transforms can reuse the pipeline
-for experiments, and v0.4.14 shipped a DCT-II and a Haar transform selectable
-by name.
+for experiments, v0.4.14 shipped a DCT-II and a Haar transform selectable
+by name, and v0.4.15 added pickled arrays and pixel lists as input, read
+through an allowlist so nothing in the file is executed, plus a generated
+table of contents in the README.
 Partially based on
 https://github.com/ktisha/python2012/tree/dee4beda8e22f3a66a3e31384d4b72ab66102e88/avereshchagin
