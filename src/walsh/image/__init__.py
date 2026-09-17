@@ -5,16 +5,15 @@ Every raster format shares the contract described on
 file itself stores. :func:`reader_for` picks the class to use from a filename.
 
 This was a single ``image.py`` module up to 0.1.3; the names it exported are
-re-exported here, so existing imports keep working. The format modules were
-siblings of this file up to 0.4.15 and are grouped by family since 0.4.16:
-:mod:`~walsh.image.raster` (BMP, TIFF), :mod:`~walsh.image.netpbm` (PPM, PAM)
-and :mod:`~walsh.image.arrays` (``.npy``, pickles). Their old paths, such as
-``walsh.image.bmp``, remain importable as aliases of the new ones.
+re-exported here, so existing imports keep working. The format modules are
+grouped by family: :mod:`~walsh.image.raster` (BMP, TIFF),
+:mod:`~walsh.image.netpbm` (PPM, PAM) and :mod:`~walsh.image.arrays` (``.npy``,
+pickles). Import their classes from this package rather than from those
+modules, whose paths are an implementation detail.
 """
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 from walsh.exceptions import UnsupportedFileFormatError
@@ -100,24 +99,6 @@ SUFFIXES: dict[str, type[RasterImage]] = {
     ".tif": TIFFImage,
     ".tiff": TIFFImage,
 }
-
-#: Where each format module lived while this package was flat, up to 0.4.15.
-_MOVED = {
-    "bmp": "walsh.image.raster.bmp",
-    "tiff": "walsh.image.raster.tiff",
-    "ppm": "walsh.image.netpbm.ppm",
-    "pam": "walsh.image.netpbm.pam",
-    "npy": "walsh.image.arrays.npy",
-    "pkl": "walsh.image.arrays.pkl",
-}
-
-# Every new module is already imported above, so this only adds names: the
-# same module object answers to both paths, and `from walsh.image.bmp import
-# BMPImage` keeps working without a file of that name. Private modules moved
-# without an alias.
-for _old, _new in _MOVED.items():
-    sys.modules[f"{__name__}.{_old}"] = sys.modules[_new]
-    globals()[_old] = sys.modules[_new]
 
 #: Used when the format cannot be inferred: a path with no suffix, or ``None``
 #: for stdin. BMP because it was the only format before 0.2.0, so this is what

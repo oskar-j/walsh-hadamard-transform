@@ -81,12 +81,14 @@ every test module's basename must be unique across the tree, and there must
 be no second `conftest.py`. A test that needs a repository path takes `ROOT`
 or `DATA_DIR` from `conftest` instead of counting `parent` hops, which broke
 for four files the day the folders appeared; `test_readme_toc.py` is the one
-exception, because it also runs as a script. And the old flat module paths
-(`walsh.image.bmp` and the five others in `_MOVED`) are kept importable by
-aliasing them in `sys.modules` from `image/__init__.py`; `test_layout.py`
-proves that in a fresh interpreter, which is the only place an import alias
-can honestly be tested. Private modules (`_netpbm`, now `netpbm/_samples`;
-`_arrays`, now `arrays/_rules`) moved without an alias.
+exception, because it also runs as a script. And **`walsh.image` is the
+import path; where a class lives below it is an implementation detail.** The
+flat paths of 0.4.15 and earlier (`walsh.image.bmp` and its siblings) were
+dropped in the move rather than aliased: compatibility scaffolding would
+have made the source narrate its own history, and every documented import
+already went through `walsh.image` or `walsh`. `test_layout.py` pins the
+exports, each path checked as the first import of a fresh interpreter, which
+is where an import cycle between the family packages would show.
 
 ## Architecture
 
@@ -521,6 +523,7 @@ for experiments, v0.4.14 shipped a DCT-II and a Haar transform selectable
 by name, and v0.4.15 added pickled arrays and pixel lists as input, read
 through an allowlist so nothing in the file is executed, plus a generated
 table of contents in the README. v0.4.16 grouped the format modules and the
-tests into folders, with the old module paths kept as aliases.
+tests into folders; the flat module paths such as `walsh.image.bmp` went with
+it, and `walsh.image` is the import path.
 Partially based on
 https://github.com/ktisha/python2012/tree/dee4beda8e22f3a66a3e31384d4b72ab66102e88/avereshchagin
