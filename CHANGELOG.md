@@ -9,6 +9,41 @@ The `## [x.y.z]` headings are load-bearing: the release workflow extracts the
 section matching the version in `pyproject.toml` and uses it as the GitHub
 Release notes.
 
+## [0.4.14]
+
+### Added
+
+- `Task(transform="dct")` and `Task(transform="haar")`: the transform keyword
+  takes a name as well as an instance. `"walsh"` names the default, names are
+  case-insensitive, and an unknown one is a `ValueError` at construction that
+  lists the known names. `walsh.transforms.transform_for(name)` does the
+  lookup and `TRANSFORMS` is the registry.
+- `DiscreteCosineTransform` (the orthonormal DCT-II, the transform inside
+  JPEG) and `HaarTransform`, moved into the package from the 0.4.13 example,
+  with their memoised, read-only matrices `dct_matrix` and `haar_matrix`.
+- `MatrixTransform`, a public base class for any separable orthonormal
+  transform: a subclass supplies `matrix(size)` and gets both directions and
+  the one-product stack methods. The example now selects the three shipped
+  transforms by name and defines a fourth, a Hartley transform, this way; it
+  trails the others because its matrix puts half of its low frequencies in
+  its last rows, while the codec keeps the top-left corner of each spectrum.
+
+### Notes
+
+- **Only the Walsh-Hadamard transform is bit-exact across platforms.** The
+  DCT and Haar matrices are irrational, so their products round and the
+  rounding follows the BLAS library. They are accurate to rounding and meant
+  for comparison; nothing pins their output byte for byte.
+- The warning from 0.4.13 matters more now that the names are this
+  convenient: **the `.cim` does not record which transform wrote it**, and a
+  file written with `"dct"` or `"haar"` decodes under the default without
+  complaint into a degraded picture. The `walsh` command still takes no
+  transform for that reason; giving the container a field for it is a format
+  change and would come first.
+- The default's output is unchanged and still byte-identical to the
+  checked-in samples. 447 to 485 tests, coverage 98.90% to 98.95%. Run locally
+  on 3.10 through 3.14.
+
 ## [0.4.13]
 
 ### Added

@@ -199,48 +199,31 @@ Task().with_action("compress").with_input("data/image.bmp").with_output("out.cim
 Task().with_action("extract").with_input("out.cim").with_output("back.bmp").run()
 ```
 
-#### Trying another transform
+#### Other transforms
 
-`Task` takes the block transform as an instance, so a DCT, a Haar transform or
-anything else can reuse the whole pipeline — the colour conversion, the
-padding, the crop to the low-frequency corner, the container — with only the
-transform swapped. Subclass `Transform` and implement one block each way:
+`Task` takes the block transform as a keyword, so another transform can reuse
+the whole pipeline — the colour conversion, the padding, the crop to the
+low-frequency corner, the container — with only the transform swapped. Three
+ship with the package and are selected by name, in any case:
+
+| Name | Transform | Notes |
+| --- | --- | --- |
+| `"walsh"` | Walsh-Hadamard, sequency ordered | The default, and what the `.cim` format and the `walsh` command mean. Exact arithmetic: byte-identical output on every platform. |
+| `"dct"` | DCT-II, the transform inside JPEG | Best quality per byte on natural pictures. |
+| `"haar"` | Haar wavelet | Block edges must be powers of two, which `Task` requires anyway. |
 
 ```python
-import numpy as np
-from walsh import Task, Transform
+from walsh import Task
 
-
-class Dct(Transform):
-    """The orthonormal DCT-II, the transform inside JPEG."""
-
-    @staticmethod
-    def matrix(edge):
-        k, i = np.arange(edge)[:, None], np.arange(edge)[None, :]
-        m = np.cos(np.pi * (2 * i + 1) * k / (2 * edge)) * np.sqrt(2 / edge)
-        m[0] /= np.sqrt(2)
-        return m
-
-    def transform(self, src):
-        m = self.matrix(src.shape[-1])
-        return m @ src @ m.T
-
-    def inverse_transform(self, src):
-        m = self.matrix(src.shape[-1])
-        return m.T @ src @ m
-
-
-Task(transform=Dct()).with_action("compress").with_input("data/earth.ppm").with_output(
+Task(transform="dct").with_action("compress").with_input("data/earth.ppm").with_output(
     "dct.cim"
 ).run()
-Task(transform=Dct()).with_action("extract").with_input("dct.cim").with_output("back.ppm").run()
+Task(transform="dct").with_action("extract").with_input("dct.cim").with_output("back.ppm").run()
 ```
 
-That is all a subclass needs. `Task` calls `transform_stack` and
-`inverse_transform_stack` with every block of a channel at once, and their
-defaults loop over the blocks; override them when the transform can take a
-whole `(count, edge, edge)` stack in one operation, as `@` can.
-`with_coeff_removal` is applied by the task, so it works for any transform.
+An unknown name is a `ValueError` that lists the known ones. `"dct"` and
+`"haar"` are ordinary floating-point matrix products, accurate to rounding;
+only `"walsh"` carries the bit-exactness guarantee.
 
 > **The `.cim` does not record which transform wrote it.** A file written with
 > anything but the default must be extracted by a `Task` given the same
@@ -248,25 +231,58 @@ whole `(count, edge, edge)` stack in one operation, as `@` can.
 > without complaint into a degraded picture. This keyword is for experiments,
 > not for files you hand to someone else.
 
-`examples/compare_transforms.py` runs three transforms over the Blue Marble
-sample. The byte count depends on the geometry alone, so each row is a
-like-for-like comparison of how much picture a transform packs into its first
-few coefficients:
+`examples/compare_transforms.py` runs them over the Blue Marble sample. The
+byte count depends on the geometry alone, so each row is a like-for-like
+comparison of how much picture a transform packs into its first few
+coefficients:
 
-| Kept per axis | Bytes | Walsh-Hadamard | DCT-II | Haar |
-| ---: | ---: | ---: | ---: | ---: |
-| 2 | 30,026 | 21.59 dB | 22.29 dB | 21.59 dB |
-| 3 | 67,526 | 23.09 dB | 24.44 dB | 22.85 dB |
-| 4 | 120,026 | 25.07 dB | 26.45 dB | 25.07 dB |
-| 6 | 270,026 | 28.88 dB | 31.70 dB | 27.72 dB |
-| 8 | 480,026 | 42.70 dB | 43.65 dB | 42.70 dB |
+| Kept per axis | Bytes | Walsh-Hadamard | DCT-II | Haar | Hartley (custom) |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 2 | 30,026 | 21.59 dB | 22.29 dB | 21.59 dB | 21.17 dB |
+| 3 | 67,526 | 23.09 dB | 24.44 dB | 22.85 dB | 22.18 dB |
+| 4 | 120,026 | 25.07 dB | 26.45 dB | 25.07 dB | 22.79 dB |
+| 6 | 270,026 | 28.88 dB | 31.70 dB | 27.72 dB | 23.51 dB |
+| 8 | 480,026 | 42.70 dB | 43.65 dB | 42.70 dB | 39.01 dB |
 
 The DCT wins throughout, which is why JPEG uses it; Walsh-Hadamard needs no
-multiplications and, since 0.4.12, is exact. Haar ties Walsh-Hadamard wherever
-the kept size is a power of two, and that is mathematics rather than
-coincidence: the first 2, 4 or 8 Walsh functions and the first 2, 4 or 8 Haar
-functions span the same piecewise-constant subspace, so the two projections
-are the same picture.
+multiplications and is exact. Haar ties Walsh-Hadamard wherever the kept size
+is a power of two, and that is mathematics rather than coincidence: the first
+2, 4 or 8 Walsh functions and the first 2, 4 or 8 Haar functions span the same
+piecewise-constant subspace, so the two projections are the same picture.
+
+#### Writing your own
+
+The last column of that table is not in the package. Anything that subclasses
+`Transform` can be passed as an instance, and for a separable orthonormal
+transform `MatrixTransform` needs only the matrix:
+
+```python
+import numpy as np
+from walsh import MatrixTransform, Task
+
+
+class Hartley(MatrixTransform):
+    """cas(2*pi*i*k/n) / sqrt(n), with cas = cos + sin."""
+
+    def matrix(self, size):
+        angle = 2 * np.pi * np.outer(np.arange(size), np.arange(size)) / size
+        return (np.cos(angle) + np.sin(angle)) / np.sqrt(size)
+
+
+Task(transform=Hartley()).with_action("compress").with_input("data/earth.ppm").with_output(
+    "hartley.cim"
+).run()
+```
+
+It trails the others for an instructive reason: the codec keeps the top-left
+corner of each spectrum, which assumes rows rise in frequency, and a Hartley
+matrix puts half of its low frequencies in its *last* rows. A transform that
+is not a matrix product subclasses `Transform` directly and implements
+`transform` and `inverse_transform` for one square block; `Task` calls
+`transform_stack` and `inverse_transform_stack`, whose defaults loop over the
+blocks, so override those when a whole `(count, edge, edge)` stack can go
+through in one operation. `with_coeff_removal` is applied by the task, so it
+works for any transform.
 
 ### Examples
 

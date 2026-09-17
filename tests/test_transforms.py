@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from typing import Any
 
 import numpy as np
 import pytest
@@ -389,3 +390,132 @@ def test_sign_matrix_shares_the_orthonormal_matrix_row_order() -> None:
     assert set(np.unique(signs)) == {-1.0, 1.0}
     np.testing.assert_array_equal(signs, np.sign(hadamard_matrix(16)))
     assert _hadamard_signs(16) is signs, "memoised, like hadamard_matrix"
+
+
+# --- the DCT, Haar and the registry (0.4.14) ---------------------------------
+
+
+@pytest.mark.parametrize("size", [1, 2, 3, 8, 12, 16, 128])
+def test_dct_matrix_is_orthonormal_at_any_size(size: int) -> None:
+    from walsh.transforms import dct_matrix
+
+    m = dct_matrix(size)
+    np.testing.assert_allclose(m @ m.T, np.eye(size), atol=1e-12)
+    np.testing.assert_allclose(m[0], np.full(size, 1 / np.sqrt(size)), atol=1e-15)
+
+
+def test_dct_matrix_matches_the_textbook_formula_entry_by_entry() -> None:
+    from walsh.transforms import dct_matrix
+
+    size = 8
+    expected = np.empty((size, size))
+    for k in range(size):
+        for i in range(size):
+            scale = math.sqrt(1 / size) if k == 0 else math.sqrt(2 / size)
+            expected[k, i] = scale * math.cos(math.pi * (2 * i + 1) * k / (2 * size))
+    np.testing.assert_allclose(dct_matrix(size), expected, atol=1e-15)
+
+
+@pytest.mark.parametrize("size", [1, 2, 4, 8, 16, 128])
+def test_haar_matrix_is_orthonormal(size: int) -> None:
+    from walsh.transforms import haar_matrix
+
+    m = haar_matrix(size)
+    np.testing.assert_allclose(m @ m.T, np.eye(size), atol=1e-12)
+
+
+def test_haar_matrix_of_four_is_the_textbook_one() -> None:
+    from walsh.transforms import haar_matrix
+
+    r = 1 / math.sqrt(2)
+    expected = np.array(
+        [[0.5, 0.5, 0.5, 0.5], [0.5, 0.5, -0.5, -0.5], [r, -r, 0, 0], [0, 0, r, -r]]
+    )
+    np.testing.assert_allclose(haar_matrix(4), expected, atol=1e-15)
+
+
+@pytest.mark.parametrize("size", [0, -4, 3, 6, 12])
+def test_haar_matrix_needs_a_power_of_two(size: int) -> None:
+    from walsh.transforms import haar_matrix
+
+    with pytest.raises(ValueError, match="power of two"):
+        haar_matrix(size)
+
+
+@pytest.mark.parametrize("size", [0, -1])
+def test_dct_matrix_needs_a_positive_size(size: int) -> None:
+    from walsh.transforms import dct_matrix
+
+    with pytest.raises(ValueError, match="positive"):
+        dct_matrix(size)
+
+
+def test_shipped_matrices_are_memoised_and_read_only() -> None:
+    """Every caller shares the one array, so nobody may write to it."""
+    from walsh.transforms import dct_matrix, haar_matrix
+
+    for build in (dct_matrix, haar_matrix):
+        matrix = build(8)
+        assert build(8) is matrix
+        with pytest.raises(ValueError, match="read-only"):
+            matrix[0, 0] = 1.0
+
+
+@pytest.mark.parametrize("name", ["dct", "haar"])
+def test_matrix_transforms_round_trip_and_take_stacks(name: str) -> None:
+    from walsh.transforms import transform_for
+
+    transform = transform_for(name)
+    rng = np.random.default_rng(seed=47)
+    stack = rng.uniform(0, 255, size=(7, 16, 16))
+
+    spectra = transform.transform_stack(stack)
+    assert spectra.shape == stack.shape
+    np.testing.assert_allclose(transform.inverse_transform_stack(spectra), stack, atol=1e-9)
+    for block, spectrum in zip(stack, spectra, strict=True):
+        np.testing.assert_allclose(transform.transform(block), spectrum, atol=1e-9)
+
+    # Orthonormal: energy is preserved, and a flat block is all DC.
+    np.testing.assert_allclose((spectra**2).sum(), (stack**2).sum(), rtol=1e-12)
+    flat = transform.transform(np.full((16, 16), 100.0))
+    assert flat[0, 0] == pytest.approx(1600.0)
+    np.testing.assert_allclose(flat.ravel()[1:], 0, atol=1e-9)
+
+    with pytest.raises(ValueError, match="square"):
+        transform.transform(np.zeros((4, 8)))
+    with pytest.raises(ValueError, match="square"):
+        transform.inverse_transform(np.zeros((2, 4, 8)))
+
+
+def test_a_matrix_transform_needs_only_a_matrix() -> None:
+    from walsh.transforms import MatrixTransform
+
+    class Identity(MatrixTransform):
+        def matrix(self, size: int) -> np.ndarray:
+            return np.eye(size)
+
+    block = np.arange(16.0).reshape(4, 4)
+    np.testing.assert_array_equal(Identity().transform(block), block)
+    np.testing.assert_array_equal(Identity().inverse_transform_stack(block[None]), block[None])
+    abstract: Any = MatrixTransform
+    with pytest.raises(TypeError, match="abstract"):
+        abstract()
+
+
+def test_transform_for_knows_three_names_in_any_case() -> None:
+    from walsh.transforms import (
+        TRANSFORMS,
+        DiscreteCosineTransform,
+        HaarTransform,
+        transform_for,
+    )
+
+    assert sorted(TRANSFORMS) == ["dct", "haar", "walsh"]
+    assert type(transform_for("walsh")) is WalshHadamardTransform
+    assert type(transform_for("DCT")) is DiscreteCosineTransform
+    assert type(transform_for("Haar")) is HaarTransform
+    assert transform_for("dct") is not transform_for("dct"), "a fresh instance each time"
+    with pytest.raises(
+        ValueError, match=r"unknown transform 'sine'; known transforms: dct, haar, walsh"
+    ):
+        transform_for("sine")
