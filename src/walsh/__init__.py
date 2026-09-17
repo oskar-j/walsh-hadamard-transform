@@ -26,7 +26,14 @@ from walsh.image import (
     reader_for,
 )
 from walsh.task import Action, Task
-from walsh.transforms import Transform, WalshHadamardTransform
+from walsh.transforms import (
+    DiscreteCosineTransform,
+    HaarTransform,
+    MatrixTransform,
+    Transform,
+    WalshHadamardTransform,
+    transform_for,
+)
 
 try:
     __version__ = version("walsh")
@@ -39,6 +46,9 @@ __all__ = [
     "BlockDescription",
     "ColorModel",
     "CustomizableImage",
+    "DiscreteCosineTransform",
+    "HaarTransform",
+    "MatrixTransform",
     "NPYImage",
     "PAMImage",
     "PPMImage",
@@ -53,4 +63,5 @@ __all__ = [
     "YCbCrColorModel",
     "__version__",
     "reader_for",
+    "transform_for",
 ]

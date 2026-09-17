@@ -75,7 +75,9 @@ the edge is legal. `CustomizableImage.set_data` mirrors the packed check on
 the write side. The CLI builds the `Task` inside `_run`'s guarded region for
 this reason: `_run` takes a factory, not a task.
 
-`Task(transform=...)` (0.4.13, #41) takes a `Transform` **instance**, default
+`Task(transform=...)` (0.4.13, #41) takes a `Transform` **instance** or, since
+0.4.14, a **name** resolved by `transform_for` — `"walsh"`, `"dct"`, `"haar"`,
+case-insensitive, an unknown one a `ValueError` listing them — default
 `WalshHadamardTransform()`, used by both directions; anything else is a
 `TypeError` at construction. It is for experiments — a DCT or Haar through the
 same pipeline — and is **library only on purpose**: the `.cim` does not record
@@ -266,6 +268,21 @@ overrides both with its one broadcast product. That override is what keeps the
 built-in path vectorised; `examples/compare_transforms.py` shows a subclass
 doing the same, and `tests/test_custom_transform.py` runs that example.
 
+`MatrixTransform` (0.4.14) is the public base for a separable orthonormal
+transform given by one matrix: `m @ src @ m.T`, inverse by the transpose,
+stacks in one broadcast product. `DiscreteCosineTransform` and `HaarTransform`
+are built on it from the module-level memoised `dct_matrix` and `haar_matrix`,
+whose arrays are read-only because every caller shares them. `TRANSFORMS` is
+the name registry; adding a transform means a class and an entry there.
+**Only Walsh-Hadamard is bit-exact.** The DCT and Haar matrices are
+irrational, so their products round and the rounding follows the BLAS: never
+pin their output byte for byte, and never add them to `tests/test_golden.py`
+or the CI `cmp` smoke. Their tests assert properties with margins instead
+(orthonormality, round trip, the DCT beating Walsh by over 1 dB on a smooth
+picture, Haar tying Walsh at kept sizes 2, 4 and 8 and parting at 3 and 6).
+The names make the unrecorded-transform trap easier to fall into, which is why
+the CLI still has no `--transform`: that needs a header field first.
+
 **`colors.py`** — RGB ↔ YCbCr conversion. `rgb_to_ycbcr` and `ycbcr_to_rgb`
 are the implementation and take whole `(n, 3)` arrays; the `ColorModel` classes
 are the per-pixel interface and delegate to them one pixel at a time, so the
@@ -426,6 +443,7 @@ platforms precisely. v0.4.12 made the transform's arithmetic exact (#39), so
 output is byte-identical on every platform and the decode no longer truncates
 a level low where the true value is an integer. v0.4.13 added
 `Task(transform=...)` (#41) so other block transforms can reuse the pipeline
-for experiments.
+for experiments, and v0.4.14 shipped a DCT-II and a Haar transform selectable
+by name.
 Partially based on
 https://github.com/ktisha/python2012/tree/dee4beda8e22f3a66a3e31384d4b72ab66102e88/avereshchagin

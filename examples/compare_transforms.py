@@ -3,9 +3,13 @@
 ``Task(transform=...)`` swaps the transform and nothing else: the colour
 conversion, the padding, the crop to the low-frequency corner and the ``.cim``
 container stay as they are. The file size depends only on the geometry, so
-every row of the table below is the same number of bytes and the PSNR column
-is a like-for-like comparison of how much picture each transform packs into
+every row of the table below is the same number of bytes and the dB columns
+are a like-for-like comparison of how much picture each transform packs into
 its first few coefficients.
+
+Three transforms ship with the package and are selected by name. The fourth
+column is written here, to show what a transform of your own takes: subclass
+``MatrixTransform`` and return an orthonormal matrix.
 
 Needs numpy only. Run from the repository root::
 
@@ -27,7 +31,7 @@ from pathlib import Path
 import numpy as np
 import numpy.typing as npt
 
-from walsh import Task, Transform, WalshHadamardTransform, reader_for
+from walsh import MatrixTransform, Task, Transform, reader_for
 
 Block = npt.NDArray[np.float64]
 
@@ -39,64 +43,28 @@ DATA = Path(__file__).resolve().parent.parent / "data"
 KEPT_PER_AXIS = (2, 3, 4, 6, 8)
 
 
-class MatrixTransform(Transform):
-    """A separable orthonormal transform defined by one ``edge x edge`` matrix.
-
-    ``transform`` is ``m @ block @ m.T`` and the inverse is its transpose. Both
-    stack methods are overridden, because ``@`` broadcasts over a stack and the
-    per-block default would cost a Python call per block.
-    """
-
-    def matrix(self, edge: int) -> Block:
-        """Return the orthonormal matrix for a block of this edge."""
-        raise NotImplementedError
-
-    def transform(self, src: Block) -> Block:
-        m = self.matrix(src.shape[-1])
-        return m @ src @ m.T
-
-    def inverse_transform(self, src: Block) -> Block:
-        m = self.matrix(src.shape[-1])
-        return m.T @ src @ m
-
-    def transform_stack(self, stack: Block) -> Block:
-        return self.transform(stack)
-
-    def inverse_transform_stack(self, stack: Block) -> Block:
-        return self.inverse_transform(stack)
-
-
-class DiscreteCosineTransform(MatrixTransform):
-    """The orthonormal DCT-II, the transform inside JPEG."""
+class HartleyTransform(MatrixTransform):
+    """The discrete Hartley transform: a real-valued cousin of the Fourier
+    transform whose matrix, ``cas(2 * pi * i * k / n) / sqrt(n)`` with
+    ``cas = cos + sin``, is symmetric and its own inverse."""
 
     @staticmethod
     @cache
-    def _matrix(edge: int) -> Block:
-        k = np.arange(edge)[:, None]
-        i = np.arange(edge)[None, :]
-        m = np.cos(np.pi * (2 * i + 1) * k / (2 * edge)) * np.sqrt(2 / edge)
-        m[0] /= np.sqrt(2)
-        return m
+    def _matrix(size: int) -> Block:
+        angle = 2 * np.pi * np.outer(np.arange(size), np.arange(size)) / size
+        return (np.cos(angle) + np.sin(angle)) / np.sqrt(size)
 
-    def matrix(self, edge: int) -> Block:
-        return self._matrix(edge)
+    def matrix(self, size: int) -> Block:
+        return self._matrix(size)
 
 
-class HaarTransform(MatrixTransform):
-    """The orthonormal Haar wavelet transform, rows from coarse to fine."""
-
-    @staticmethod
-    @cache
-    def _matrix(edge: int) -> Block:
-        m = np.ones((1, 1))
-        while m.shape[0] < edge:
-            coarse = np.kron(m, [1.0, 1.0])
-            fine = np.kron(np.eye(m.shape[0]), [1.0, -1.0])
-            m = np.vstack([coarse, fine])
-        return m / np.linalg.norm(m, axis=1, keepdims=True)
-
-    def matrix(self, edge: int) -> Block:
-        return self._matrix(edge)
+#: Column heading -> what to hand ``Task(transform=...)``: a name or an instance.
+TRANSFORMS: dict[str, Transform | str] = {
+    "Walsh-Hadamard": "walsh",
+    "DCT-II": "dct",
+    "Haar": "haar",
+    "Hartley (custom)": HartleyTransform(),
+}
 
 
 def pixels(path: Path) -> npt.NDArray[np.float64]:
@@ -110,32 +78,32 @@ def psnr(original: npt.NDArray[np.float64], restored: npt.NDArray[np.float64]) -
     return float("inf") if mse == 0 else 10 * np.log10(255.0**2 / mse)
 
 
-def round_trip(source: Path, transform: Transform, packed: int, workdir: Path) -> tuple[float, int]:
+def round_trip(
+    source: Path, transform: Transform | str, packed: int, workdir: Path
+) -> tuple[float, int]:
     compressed = workdir / "out.cim"
     restored = workdir / f"back{source.suffix}"
-    task = {"packed_block_size": packed, "transform": transform}
-    Task(**task).with_action("compress").with_input(str(source)).with_output(str(compressed)).run()
-    Task(**task).with_action("extract").with_input(str(compressed)).with_output(str(restored)).run()
+
+    def task() -> Task:
+        return Task(packed_block_size=packed, transform=transform)
+
+    task().with_action("compress").with_input(str(source)).with_output(str(compressed)).run()
+    task().with_action("extract").with_input(str(compressed)).with_output(str(restored)).run()
     return psnr(pixels(source), pixels(restored)), compressed.stat().st_size
 
 
 def main() -> None:
     source = Path(sys.argv[1]) if len(sys.argv) > 1 else DATA / "earth.ppm"
-    transforms: dict[str, Transform] = {
-        "Walsh-Hadamard": WalshHadamardTransform(),
-        "DCT-II": DiscreteCosineTransform(),
-        "Haar": HaarTransform(),
-    }
     print(f"{source.name}, luma blocks of 8, chroma blocks of 16\n")
-    print(f"{'kept per axis':>13}  {'bytes':>9}  " + "  ".join(f"{n:>14}" for n in transforms))
+    print(f"{'kept per axis':>13}  {'bytes':>9}  " + "  ".join(f"{n:>16}" for n in TRANSFORMS))
     with tempfile.TemporaryDirectory() as tmp:
         for packed in KEPT_PER_AXIS:
-            results = [round_trip(source, t, packed, Path(tmp)) for t in transforms.values()]
+            results = [round_trip(source, t, packed, Path(tmp)) for t in TRANSFORMS.values()]
             sizes = {size for _, size in results}
             assert len(sizes) == 1, "the size depends on the geometry alone"
             print(
                 f"{packed:>13}  {sizes.pop():>9,}  "
-                + "  ".join(f"{quality:>11.2f} dB" for quality, _ in results)
+                + "  ".join(f"{quality:>13.2f} dB" for quality, _ in results)
             )
 
 

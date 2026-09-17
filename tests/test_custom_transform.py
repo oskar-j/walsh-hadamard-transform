@@ -13,7 +13,14 @@ import pytest
 from click.testing import CliRunner
 
 from conftest import write_ppm
-from walsh import Task, Transform, WalshHadamardTransform, reader_for
+from walsh import (
+    DiscreteCosineTransform,
+    HaarTransform,
+    Task,
+    Transform,
+    WalshHadamardTransform,
+    reader_for,
+)
 from walsh.cli import main
 from walsh.transforms import Block, remove_small_coefficients
 
@@ -168,8 +175,8 @@ def test_coeff_removal_works_for_a_custom_transform(picture: Path, tmp_path: Pat
 
 @pytest.mark.parametrize(
     "not_a_transform",
-    [WalshHadamardTransform, "dct", lambda block: block, object()],
-    ids=["the class", "a string", "a function", "an object"],
+    [WalshHadamardTransform, b"dct", 8, lambda block: block, object()],
+    ids=["the class", "bytes", "a number", "a function", "an object"],
 )
 def test_anything_but_a_transform_instance_is_rejected_at_construction(
     not_a_transform: Any,
@@ -301,13 +308,92 @@ def test_the_comparison_example_runs_and_its_transforms_are_orthonormal(
     picture: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     example = _load_example()
-    for transform in (example.DiscreteCosineTransform(), example.HaarTransform()):
-        for edge in (8, 16):
-            m = transform.matrix(edge)
-            np.testing.assert_allclose(m @ m.T, np.eye(edge), atol=1e-12)
+    for edge in (8, 16):
+        m = example.HartleyTransform().matrix(edge)
+        np.testing.assert_allclose(m @ m.T, np.eye(edge), atol=1e-12)
 
     monkeypatch.setattr(sys, "argv", ["compare_transforms.py", str(picture)])
     example.main()
     table = capsys.readouterr().out
-    assert "Walsh-Hadamard" in table and "DCT-II" in table and "Haar" in table
-    assert table.count(" dB") == 3 * len(example.KEPT_PER_AXIS)
+    for heading in example.TRANSFORMS:
+        assert heading in table
+    assert table.count(" dB") == len(example.TRANSFORMS) * len(example.KEPT_PER_AXIS)
+
+
+# --- transforms by name (0.4.14) ---------------------------------------------
+
+
+def _round_trip_psnr(transform: Transform | str, packed: int, picture: Path, tmp: Path) -> float:
+    cim, back = tmp / f"{packed}.cim", tmp / f"{packed}.ppm"
+    _compress(Task(transform=transform, packed_block_size=packed), picture, cim)
+    _extract(Task(transform=transform, packed_block_size=packed), cim, back)
+    return _psnr(picture, back)
+
+
+@pytest.mark.parametrize(
+    ("name", "transform_class"),
+    [
+        ("walsh", WalshHadamardTransform),
+        ("dct", DiscreteCosineTransform),
+        ("haar", HaarTransform),
+        ("DCT", DiscreteCosineTransform),
+        ("Haar", HaarTransform),
+    ],
+)
+def test_a_name_means_an_instance_of_that_transform(
+    name: str, transform_class: type[Transform], picture: Path, tmp_path: Path
+) -> None:
+    by_name = _compress(Task(transform=name), picture, tmp_path / "name.cim")
+    by_instance = _compress(Task(transform=transform_class()), picture, tmp_path / "instance.cim")
+    assert by_name == by_instance
+
+    back_by_name = _extract(Task(transform=name), tmp_path / "name.cim", tmp_path / "a.ppm")
+    back_by_instance = _extract(
+        Task(transform=transform_class()), tmp_path / "name.cim", tmp_path / "b.ppm"
+    )
+    assert back_by_name.read_bytes() == back_by_instance.read_bytes()
+
+
+def test_the_name_walsh_is_the_default(picture: Path, tmp_path: Path) -> None:
+    assert _compress(Task(transform="walsh"), picture, tmp_path / "named.cim") == _compress(
+        Task(), picture, tmp_path / "default.cim"
+    )
+
+
+def test_an_unknown_name_is_rejected_at_construction_with_the_known_ones() -> None:
+    with pytest.raises(ValueError, match=r"unknown transform 'fourier'.*dct, haar, walsh"):
+        Task(transform="fourier")
+
+
+def test_every_named_transform_round_trips_and_the_dct_wins_on_a_smooth_picture(
+    picture: Path, tmp_path: Path
+) -> None:
+    quality = {
+        name: _round_trip_psnr(name, 4, picture, tmp_path) for name in ("walsh", "dct", "haar")
+    }
+    assert min(quality.values()) > 25
+    assert quality["dct"] > quality["walsh"] + 1
+
+
+def test_haar_ties_walsh_at_a_power_of_two_and_only_there(picture: Path, tmp_path: Path) -> None:
+    """The first 2**k Walsh functions and the first 2**k Haar functions span
+    the same piecewise-constant subspace, so keeping that many per axis gives
+    the same picture up to coefficient rounding. At 3 and 6 they part ways."""
+    for packed in (2, 4, 8):
+        walsh = _round_trip_psnr("walsh", packed, picture, tmp_path)
+        haar = _round_trip_psnr("haar", packed, picture, tmp_path)
+        assert haar == pytest.approx(walsh, abs=0.15), packed
+    for packed in (3, 6):
+        walsh = _round_trip_psnr("walsh", packed, picture, tmp_path)
+        haar = _round_trip_psnr("haar", packed, picture, tmp_path)
+        assert abs(haar - walsh) > 0.3, packed
+
+
+def test_coeff_removal_works_for_a_named_transform(picture: Path, tmp_path: Path) -> None:
+    plain = _compress(Task(transform="haar"), picture, tmp_path / "plain.cim")
+    thinned = _compress(
+        Task(transform="haar").with_coeff_removal(50.0), picture, tmp_path / "thinned.cim"
+    )
+    assert (np.frombuffer(thinned[HEADER:], dtype="<i2") == 0).sum() > (
+        np.frombuffer(plain[HEADER:], dtype="<i2") == 0
+    ).sum()

@@ -21,7 +21,13 @@ from walsh.image import (
     blocks_for,
     reader_for,
 )
-from walsh.transforms import Transform, WalshHadamardTransform, remove_small_coefficients
+from walsh.transforms import (
+    TRANSFORMS,
+    Transform,
+    WalshHadamardTransform,
+    remove_small_coefficients,
+    transform_for,
+)
 
 __all__ = ["Action", "Task"]
 
@@ -68,7 +74,7 @@ class Task:
         cb_block_size: int = DEFAULT_CHROMA_BLOCK_SIZE,
         cr_block_size: int = DEFAULT_CHROMA_BLOCK_SIZE,
         packed_block_size: int = DEFAULT_PACKED_BLOCK_SIZE,
-        transform: Transform | None = None,
+        transform: Transform | str | None = None,
     ) -> None:
         """Create an unconfigured task with the default block geometry.
 
@@ -78,10 +84,13 @@ class Task:
             cr_block_size: Block edge used for the Cr channel.
             packed_block_size: How many low-frequency coefficients per axis are
                 kept when writing. This is the codec's lossy knob.
-            transform: The block transform both directions run, as an
-                instance of a :class:`~walsh.transforms.Transform` subclass;
-                ``None``, the default, is the Walsh-Hadamard transform. It
-                exists for experiments: a DCT or a Haar transform dropped in
+            transform: The block transform both directions run: a name,
+                ``"walsh"``, ``"dct"`` or ``"haar"`` in any case (see
+                :data:`~walsh.transforms.TRANSFORMS`), or an instance of a
+                :class:`~walsh.transforms.Transform` subclass. ``None``, the
+                default, is the Walsh-Hadamard transform, and the only one
+                whose output is bit-exact across platforms. The others
+                exist for experiments: a DCT or a Haar transform dropped in
                 reuses the colour conversion, the padding, the crop to the
                 packed corner and the container, so the comparison is between
                 transforms and nothing else. **The ``.cim`` does not record
@@ -92,10 +101,12 @@ class Task:
                 complaint into the wrong picture.
 
         Raises:
-            TypeError: If ``transform`` is neither ``None`` nor a
+            TypeError: If ``transform`` is neither ``None``, a string nor a
                 :class:`~walsh.transforms.Transform` instance, such as the
                 class itself or a bare function.
-            ValueError: If a block edge is not a power of two, or exceeds
+            ValueError: If ``transform`` is a string that names no known
+                transform, in which case the message lists the names that
+                are. Also if a block edge is not a power of two, or exceeds
                 ``MAX_BLOCK_SIZE``, or the packed size is not between 1 and the
                 smallest block edge. Each of those used to fail late and
                 quietly: an edge of 0 died in the padding arithmetic with a
@@ -107,12 +118,7 @@ class Task:
                 exit 0. The packed size need not be a power of two.
         """
         self._check_block_sizes(y_block_size, cb_block_size, cr_block_size, packed_block_size)
-        if transform is not None and not isinstance(transform, Transform):
-            raise TypeError(
-                f"transform must be a Transform instance, got {transform!r}; "
-                f"pass an instance of a walsh.transforms.Transform subclass"
-            )
-        self._transform: Transform = WalshHadamardTransform() if transform is None else transform
+        self._transform = self._resolve_transform(transform)
         self._input: FileSource = None
         self._output: FileSource = None
         self._action: Action | None = None
@@ -121,6 +127,32 @@ class Task:
         self._cb_block_size = cb_block_size
         self._cr_block_size = cr_block_size
         self._packed_block_size = packed_block_size
+
+    @staticmethod
+    def _resolve_transform(transform: Transform | str | None) -> Transform:
+        """Turn the constructor's ``transform`` argument into an instance.
+
+        Args:
+            transform: ``None``, a known name, or a transform instance.
+
+        Returns:
+            The Walsh-Hadamard transform for ``None``, a fresh instance for a
+            name, and the instance itself otherwise.
+
+        Raises:
+            ValueError: If a name is not one of the known transforms.
+            TypeError: If it is none of the three.
+        """
+        if transform is None:
+            return WalshHadamardTransform()
+        if isinstance(transform, str):
+            return transform_for(transform)
+        if isinstance(transform, Transform):
+            return transform
+        known = ", ".join(repr(name) for name in sorted(TRANSFORMS))
+        raise TypeError(
+            f"transform must be a Transform instance or one of {known}, got {transform!r}"
+        )
 
     @staticmethod
     def _check_block_sizes(y: int, cb: int, cr: int, packed: int) -> None:

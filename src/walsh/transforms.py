@@ -4,12 +4,18 @@ Since 0.4.12 the transform is *exact*: every floating-point operation it
 performs has an exactly representable result, so its output is a function of
 its input bits alone and is identical on every platform and BLAS library. See
 :meth:`WalshHadamardTransform._spectrum` for how, and #39 for why.
+
+Two more transforms ship for comparison (0.4.14), a DCT-II and a Haar
+transform, and :func:`transform_for` resolves all three by name. They are
+ordinary floating-point matrix products: accurate to rounding, but only the
+Walsh-Hadamard transform carries the bit-exactness guarantee, because their
+matrices are irrational and every product rounds.
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 
 import numpy as np
 import numpy.typing as npt
@@ -17,10 +23,17 @@ import numpy.typing as npt
 from walsh.decorators import cached
 
 __all__ = [
+    "TRANSFORMS",
+    "DiscreteCosineTransform",
+    "HaarTransform",
+    "MatrixTransform",
     "Transform",
     "WalshHadamardTransform",
+    "dct_matrix",
+    "haar_matrix",
     "hadamard_matrix",
     "remove_small_coefficients",
+    "transform_for",
 ]
 
 Block = npt.NDArray[np.float64]
@@ -370,10 +383,7 @@ class WalshHadamardTransform(Transform):
         Raises:
             ValueError: If ``src`` is not a square block or a stack of them.
         """
-        src = np.asarray(src, dtype=np.float64)
-        if src.ndim not in (2, 3) or src.shape[-1] != src.shape[-2]:
-            raise ValueError(f"expected a square block or a stack of them, got shape {src.shape}")
-
+        src = _square(src)
         size = src.shape[-1]
         signs = _hadamard_signs(size)
         grid = _grid_scale(size)
@@ -508,3 +518,245 @@ def _sign_changes(matrix: Block) -> npt.NDArray[np.int64]:
     """
     counts: npt.NDArray[np.int64] = np.count_nonzero(matrix[:, 1:] * matrix[:, :-1] < 0, axis=1)
     return counts
+
+
+def _square(src: Block) -> Block:
+    """Return ``src`` as ``float64``, insisting it is square blocks.
+
+    Args:
+        src: A square 2-D array, or a 3-D stack of them along the first axis.
+
+    Returns:
+        ``src`` as a ``float64`` array.
+
+    Raises:
+        ValueError: If ``src`` is not a square block or a stack of them.
+    """
+    array = np.asarray(src, dtype=np.float64)
+    if array.ndim not in (2, 3) or array.shape[-1] != array.shape[-2]:
+        raise ValueError(f"expected a square block or a stack of them, got shape {array.shape}")
+    return array
+
+
+# -- transforms shipped for comparison (0.4.14) -------------------------------
+
+
+class MatrixTransform(Transform):
+    """A separable orthonormal transform defined by one ``size x size`` matrix.
+
+    ``transform`` is ``m @ block @ m.T`` and, the matrix being orthonormal, the
+    inverse is ``m.T @ spectrum @ m``. A subclass supplies :meth:`matrix` and
+    nothing else. ``@`` broadcasts, so a stack goes through in one product.
+
+    These are plain floating-point products. Unlike
+    :class:`WalshHadamardTransform` they are not bit-exact across platforms:
+    an irrational matrix makes every product round, and the rounding follows
+    the BLAS library's summation order.
+    """
+
+    @abstractmethod
+    def matrix(self, size: int) -> Block:
+        """Return the orthonormal matrix for blocks of edge ``size``.
+
+        Args:
+            size: Edge length of the block.
+
+        Returns:
+            A ``size`` by ``size`` matrix whose rows are orthonormal. It is
+            called once per transform call, so memoise anything expensive.
+        """
+
+    def transform(self, src: Block) -> Block:
+        """Transform one square block, or a stack of them.
+
+        Args:
+            src: A square 2-D array of samples, or a 3-D stack of them along
+                the first axis.
+
+        Returns:
+            ``m @ src @ m.T``, the same shape as ``src``.
+
+        Raises:
+            ValueError: If ``src`` is not a square block or a stack of them.
+        """
+        src = _square(src)
+        m = self.matrix(src.shape[-1])
+        spectrum: Block = m @ src @ m.T
+        return spectrum
+
+    def inverse_transform(self, src: Block) -> Block:
+        """Invert :meth:`transform` with the transposed matrix.
+
+        Args:
+            src: A square 2-D spectrum, or a 3-D stack of them along the first
+                axis.
+
+        Returns:
+            ``m.T @ src @ m``, the same shape as ``src``.
+
+        Raises:
+            ValueError: If ``src`` is not a square block or a stack of them.
+        """
+        src = _square(src)
+        m = self.matrix(src.shape[-1])
+        restored: Block = m.T @ src @ m
+        return restored
+
+    def transform_stack(self, stack: Block) -> Block:
+        """Transform a whole stack in one broadcast matrix product.
+
+        Args:
+            stack: The blocks, stacked along the first axis.
+
+        Returns:
+            The spectra, the same shape as ``stack``.
+
+        Raises:
+            ValueError: If ``stack`` is not a stack of square blocks.
+        """
+        return self.transform(stack)
+
+    def inverse_transform_stack(self, stack: Block) -> Block:
+        """Invert a whole stack in one broadcast matrix product.
+
+        Args:
+            stack: The spectra, stacked along the first axis.
+
+        Returns:
+            The reconstructed blocks, the same shape as ``stack``.
+
+        Raises:
+            ValueError: If ``stack`` is not a stack of square blocks.
+        """
+        return self.inverse_transform(stack)
+
+
+@cached
+def dct_matrix(size: int) -> Block:
+    """Build the orthonormal DCT-II matrix, the transform inside JPEG.
+
+    Row ``k`` is ``cos(pi * (2 * i + 1) * k / (2 * size))`` over the columns
+    ``i``, scaled to unit length, so row 0 is constant and the rows rise in
+    frequency. Memoised on ``size``; the array is read-only because every
+    caller shares it.
+
+    Args:
+        size: Edge length of the matrix. Any positive integer.
+
+    Returns:
+        The ``size`` by ``size`` orthonormal matrix.
+
+    Raises:
+        ValueError: If ``size`` is not positive.
+    """
+    if size < 1:
+        raise ValueError(f"size must be positive, got {size}")
+    k = np.arange(size, dtype=np.float64)[:, None]
+    i = np.arange(size, dtype=np.float64)[None, :]
+    matrix: Block = np.cos(np.pi * (2 * i + 1) * k / (2 * size)) * np.sqrt(2 / size)
+    matrix[0] /= np.sqrt(2)
+    matrix.flags.writeable = False
+    return matrix
+
+
+@cached
+def haar_matrix(size: int) -> Block:
+    """Build the orthonormal Haar wavelet matrix, rows from coarse to fine.
+
+    Each doubling keeps the rows so far, stretched to twice the width, and
+    appends one ``[1, -1]`` difference per pair of samples; rows are then
+    scaled to unit length. Row 0 is constant, like the other transforms here.
+    Memoised on ``size``; the array is read-only because every caller shares
+    it.
+
+    Args:
+        size: Edge length of the matrix. Must be a power of two.
+
+    Returns:
+        The ``size`` by ``size`` orthonormal matrix.
+
+    Raises:
+        ValueError: If ``size`` is not a positive power of two.
+    """
+    if size < 1 or size & (size - 1):
+        raise ValueError(f"size must be a power of two, got {size}")
+    matrix = np.ones((1, 1), dtype=np.float64)
+    while matrix.shape[0] < size:
+        coarse = np.kron(matrix, np.array([1.0, 1.0]))
+        fine = np.kron(np.eye(matrix.shape[0]), np.array([1.0, -1.0]))
+        matrix = np.vstack([coarse, fine])
+    normalised: Block = matrix / np.linalg.norm(matrix, axis=1, keepdims=True)
+    normalised.flags.writeable = False
+    return normalised
+
+
+class DiscreteCosineTransform(MatrixTransform):
+    """The orthonormal DCT-II. Packs more of a smooth picture into its first
+    coefficients than the Walsh-Hadamard transform, at the cost of
+    multiplications and of bit-exactness."""
+
+    def matrix(self, size: int) -> Block:
+        """Return :func:`dct_matrix` for ``size``.
+
+        Args:
+            size: Edge length of the block.
+
+        Returns:
+            The ``size`` by ``size`` orthonormal DCT-II matrix.
+        """
+        return dct_matrix(size)
+
+
+class HaarTransform(MatrixTransform):
+    """The orthonormal Haar wavelet transform.
+
+    Keeping the first ``p`` coefficients per axis gives the same picture as
+    the Walsh-Hadamard transform whenever ``p`` is a power of two: the first
+    ``p`` Walsh functions and the first ``p`` Haar functions span the same
+    piecewise-constant subspace. They differ at any other ``p``.
+    """
+
+    def matrix(self, size: int) -> Block:
+        """Return :func:`haar_matrix` for ``size``.
+
+        Args:
+            size: Edge length of the block. Must be a power of two.
+
+        Returns:
+            The ``size`` by ``size`` orthonormal Haar matrix.
+
+        Raises:
+            ValueError: If ``size`` is not a positive power of two.
+        """
+        return haar_matrix(size)
+
+
+#: The transforms :func:`transform_for` knows, by name. ``"walsh"`` is the
+#: codec's own and the only one the ``.cim`` format and the ``walsh`` command
+#: mean; the others are for comparison.
+TRANSFORMS: Mapping[str, type[Transform]] = {
+    "dct": DiscreteCosineTransform,
+    "haar": HaarTransform,
+    "walsh": WalshHadamardTransform,
+}
+
+
+def transform_for(name: str) -> Transform:
+    """Return a new instance of the transform called ``name``.
+
+    Args:
+        name: One of the keys of :data:`TRANSFORMS`, in any case.
+
+    Returns:
+        A fresh instance of that transform.
+
+    Raises:
+        ValueError: If ``name`` is not a known transform. The message lists
+            the names that are.
+    """
+    try:
+        transform_class = TRANSFORMS[name.lower()]
+    except KeyError:
+        known = ", ".join(sorted(TRANSFORMS))
+        raise ValueError(f"unknown transform {name!r}; known transforms: {known}") from None
+    return transform_class()
