@@ -17,8 +17,8 @@ walsh extract  /tmp/out.cim data/<recreated>
 
 ## The Blue Marble sample
 
-`earth.ppm`, `earth.tiff`, `earth.pam` and `earth.npy` are the same 400x400
-picture in four containers, so they also serve as a check that the source
+`earth.ppm`, `earth.tiff`, `earth.pam`, `earth.npy` and `earth.pkl` are the
+same 400x400 picture in five containers, so they also serve as a check that the source
 format does not affect the result: compressing any of them produces a
 byte-identical `.cim`.
 
@@ -37,6 +37,9 @@ byte-identical `.cim`.
   `earth.ppm`. `earth.npy` is `numpy.save` of the `(400, 400, 3)` `uint8` array
   Pillow reads from `earth.ppm`; this package's own `.npy` writer reproduces
   it byte for byte, which is the check that the two agree on the layout.
+  `earth.pkl` is `pickle.dump` of that same array at protocol 4, written under
+  NumPy 2, and `numpy.load(allow_pickle=True)` reads it; this package reads it
+  through an allowlist instead, executing nothing, under NumPy 1 or 2.
 
 Reproduce the PPM with:
 
@@ -65,8 +68,10 @@ im.crop((left, top, left + side, top + side)).resize((400, 400), Image.LANCZOS).
 | `recreated.pam` | `earth.pam` round-tripped | 25.07 dB |
 | `earth.npy` | Blue Marble, bare NumPy array `(400, 400, 3)` `uint8` | — |
 | `recreated.npy` | `earth.npy` round-tripped | 25.07 dB |
+| `earth.pkl` | Blue Marble, the same array pickled at protocol 4 | — |
+| `recreated.pkl` | `earth.pkl` round-tripped, as rows of `(r, g, b)` tuples | 25.07 dB |
 
-The four Blue Marble reconstructions are pixel-identical, as they must be:
+The five Blue Marble reconstructions are pixel-identical, as they must be:
 the codec sees the same picture whichever container it arrives in.
 
 See the [main README](../README.md#reading-the-psnr-figures) for what the dB

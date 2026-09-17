@@ -12,6 +12,31 @@ Compressing images with a Hadamard transform
 
 ![The sample image, before and after a compress and extract round trip](https://raw.githubusercontent.com/oskar-j/walsh-hadamard-transform/master/doc/sample_usage.jpg)
 
+## Contents
+
+<!-- toc -->
+- [Description](#description)
+- [Contributing](#contributing)
+- [Acknowledgement](#acknowledgement)
+- [Installation](#installation)
+  - [Development](#development)
+- [How to run](#how-to-run)
+  - [Command line](#command-line)
+  - [Reading the PSNR figures](#reading-the-psnr-figures)
+  - [As a library](#as-a-library)
+    - [Other transforms](#other-transforms)
+    - [Writing your own](#writing-your-own)
+  - [Examples](#examples)
+- [Requirements](#requirements)
+- [Development commands](#development-commands)
+  - [Coverage](#coverage)
+- [Releasing](#releasing)
+- [File formats](#file-formats)
+  - [Input and output](#input-and-output)
+  - [Pickled pixels](#pickled-pixels)
+  - [The `.cim` container](#the-cim-container)
+<!-- /toc -->
+
 ## Description
 
 **From Wikipedia:** The Hadamard transform (also known as the *Walsh–Hadamard transform*, 
@@ -96,11 +121,25 @@ walsh extract  out.cim restored.bmp     # PPM in, BMP out
 walsh extract  out.cim restored.tif     # or TIFF out
 walsh extract  out.cim restored.pam     # or PAM out
 walsh extract  out.cim restored.npy     # or a bare NumPy array
+walsh extract  out.cim restored.pkl     # or a pickle of rows of (r, g, b) tuples
 ```
+
+Pickled pixels go in the same way, and a flat list of them, which does not
+carry its size, takes it from the command line:
+
+```
+walsh compress array.pkl  out.cim                            # a pickled NumPy array
+walsh compress rows.pkl   out.cim                            # [[(r, g, b), ...], ...]
+walsh compress pixels.pkl out.cim --width 400 --height 300   # [(r, g, b), ...]
+```
+
+A pickle is read through an allowlist and nothing in it is ever executed; see
+[Pickled pixels](#pickled-pixels).
 
 `compress` accepts `--packed-block-size` (how many low-frequency coefficients
 per axis to keep -- lower is smaller and lossier), `--y-block-size`,
-`--chroma-block-size` and `--coeff-removal`. Add `-v`/`-vv` for progress
+`--chroma-block-size`, `--coeff-removal`, and `--width` with `--height` for
+input that cannot say how large it is. Add `-v`/`-vv` for progress
 logging, and see `walsh compress -h` for the full list.
 
 Writes are atomic: output goes to a temporary file beside the destination and
@@ -357,6 +396,7 @@ refuses to accept the same version twice.
 | `.bmp` | Windows bitmap | 24-bit, single plane, uncompressed. Top-down (negative height) files are understood. |
 | `.ppm`, `.pnm` | Netpbm portable pixmap | `P6` binary and `P3` ASCII are read; `P6` is written. Header comments are skipped and a `maxval` below 255 is rescaled. 16-bit samples are rejected. |
 | `.npy` | NumPy array | The raw pixel matrix in NumPy's own container, for images that already live in an array. Read: `uint8` of shape `(height, width, 3)` as RGB, `(height, width)` or `(height, width, 1)` as greyscale, and `(height, width, 4)` as RGBA only when fully opaque. Other dtypes, other channel counts, transparency and CMYK are rejected by name; pickled files are refused from the header and never loaded. Written as `(height, width, 3)` `uint8`, so `numpy.load` reads it back as is. Channel order is RGB; a BGR array, as OpenCV produces, is `array[..., ::-1]`. |
+| `.pkl`, `.pickle` | Pickled pixels | A pickled NumPy array, rows of `(r, g, b)` pixels, or a flat list of them with a declared size. Read through an allowlist, so **nothing in the file is ever executed**; rows of `(r, g, b)` tuples are written. See [Pickled pixels](#pickled-pixels). |
 | `.pam` | Netpbm portable arbitrary map | `P7` with `DEPTH 3`, `TUPLTYPE RGB` (or none) and `MAXVAL` up to 255 is read and written; a lower `maxval` is rescaled. Header keys may come in any order, comment and blank lines are skipped. Greyscale, alpha, other tuple types and 16-bit samples are rejected by name. The writer's output is byte-identical to Netpbm's own `pamtopam`. |
 | `.tif`, `.tiff` | Uncompressed baseline TIFF | Both byte orders and multi-strip files are read; little-endian single-strip is written. Only the uncompressed RGB 8-bit chunky profile is supported -- LZW, palette, CMYK, greyscale, 16-bit, planar and rotated files are rejected by name. |
 
@@ -364,6 +404,49 @@ Every reader presents the same in-memory view -- RGB pixels, top row first --
 whatever the file itself stores. BMP is the awkward one on both counts, storing
 blue-green-red samples in bottom-up rows, and `BMPImage` converts in each
 direction. That shared contract is what makes cross-format conversion work.
+
+### Pickled pixels
+
+`pickle.load` and `numpy.load(allow_pickle=True)` run the program a pickle
+contains, with the power to import any module and call anything in it, so
+opening an untrusted pickle is running untrusted code. This package never
+does that. It reads the same files through an allowlist: lists, tuples, dicts,
+numbers and bytes need no lookups at all, and the only names a file may refer
+to are the handful NumPy's own pickles use to rebuild an array. Anything else
+is refused by name before it is called:
+
+```
+$ walsh compress evil.pkl out.cim
+Error: unsupported pickle: it refers to posix.system; only lists, tuples, integers and NumPy arrays are read, and nothing in a pickle is ever executed
+```
+
+What a `.pkl` or `.pickle` may hold:
+
+| Content | Size comes from | Notes |
+| --- | --- | --- |
+| A NumPy array | its shape | The `.npy` rules: `uint8`; `(h, w, 3)` RGB, `(h, w)` or `(h, w, 1)` greyscale, `(h, w, 4)` RGBA only when fully opaque. Every pickle protocol, and pickles written under NumPy 1 and NumPy 2 alike, whichever is installed. |
+| Rows of pixels, `[[(r, g, b), ...], ...]` | its structure | |
+| `{"width": w, "height": h, "pixels": [...]}` | the dict | Around a flat list, or around anything above, which must then agree. |
+| A flat list of pixels, `[(r, g, b), ...]` | `--width` and `--height`, or `Task.with_input_size(w, h)` | Top row first. It does not say how wide the picture is and nothing here guesses: 160,000 pixels could be 400x400 or 200x800. |
+
+Lists and tuples are interchangeable at every level. Samples must be integers
+in 0-255, Python's or NumPy's; floats, booleans, out-of-range values and ragged
+rows are refused by name. A declared size is never silently dropped: input that
+carries its own size, in any format, must match it.
+
+```python
+from walsh import Task
+
+Task().with_input_size(400, 300).with_action("compress").with_input("pixels.pkl").with_output(
+    "out.cim"
+).run()
+```
+
+An `object` array saved by `numpy.save`, which only
+`numpy.load(allow_pickle=True)` opens, is a pickle inside a `.npy` and is read
+the same way. The writer produces rows of `(r, g, b)` tuples of plain `int` at
+protocol 4: any Python loads that without NumPy, and its bytes do not depend on
+which NumPy wrote it.
 
 ### The `.cim` container
 

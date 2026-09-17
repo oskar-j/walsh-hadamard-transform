@@ -137,6 +137,22 @@ def main(verbose: int) -> None:
         "the default 8-pixel luma block prunes far less at a larger one."
     ),
 )
+@click.option(
+    "--width",
+    type=click.IntRange(min=1),
+    default=None,
+    help=(
+        "Width of INPUT in pixels. Needed only for a pickled flat list of pixels, "
+        "which does not carry its size; for any other input it is checked against "
+        "the file. Give --height too."
+    ),
+)
+@click.option(
+    "--height",
+    type=click.IntRange(min=1),
+    default=None,
+    help="Height of INPUT in pixels. See --width.",
+)
 def compress(
     input_path: str,
     output_path: str,
@@ -144,11 +160,15 @@ def compress(
     chroma_block_size: int,
     packed_block_size: int,
     coeff_removal: float | None,
+    width: int | None,
+    height: int | None,
 ) -> None:
     """Transform a raster image into a .cim file.
 
     The input format is taken from the filename suffix: .bmp, .ppm, .pnm,
-    .pam, .tif, .tiff, or .npy for a bare NumPy array.
+    .pam, .tif, .tiff, .npy for a bare NumPy array, or .pkl / .pickle for a
+    pickled array or list of pixels. A pickle is read through an allowlist:
+    nothing in it is ever executed.
     \f
     Args:
         input_path: Image to read.
@@ -157,12 +177,18 @@ def compress(
         chroma_block_size: Block edge for both chroma channels.
         packed_block_size: Coefficients kept per axis. This is the lossy knob.
         coeff_removal: Optional second lossy threshold, or ``None``.
+        width: Declared width of the input, or ``None``.
+        height: Declared height of the input, or ``None``.
 
     Raises:
-        click.ClickException: If the image cannot be read or is malformed.
-        click.UsageError: If OUTPUT names the same file as INPUT.
+        click.ClickException: If the image cannot be read or is malformed, or
+            is not the declared size.
+        click.UsageError: If OUTPUT names the same file as INPUT, or only one
+            of --width and --height is given.
     """
     _reject_writing_over_the_input(input_path, output_path)
+    if (width is None) != (height is None):
+        raise click.UsageError("--width and --height must be given together")
     _run(
         lambda: (
             Task(
@@ -172,6 +198,7 @@ def compress(
                 packed_block_size=packed_block_size,
             )
             .with_coeff_removal(coeff_removal)
+            .with_input_size(width, height)
             .with_action(Action.COMPRESS)
             .with_input(input_path)
             .with_output(output_path)
@@ -191,7 +218,7 @@ def extract(input_path: str, output_path: str) -> None:
     Args:
         input_path: The .cim file to read.
         output_path: Image to write, ending .bmp, .ppm, .pnm, .pam, .tif,
-            .tiff or .npy.
+            .tiff, .npy, .pkl or .pickle.
 
     Raises:
         click.ClickException: If the .cim file is malformed, or the output

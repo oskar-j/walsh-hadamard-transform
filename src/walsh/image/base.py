@@ -50,6 +50,7 @@ class RasterImage(ABC):
         self._width = 0
         self._height = 0
         self._pixels: PixelArray = np.empty((0, CHANNELS), dtype=np.uint8)
+        self._declared_size: tuple[int, int] | None = None
 
     @abstractmethod
     def load(self, filename: FileSource) -> None:
@@ -76,6 +77,28 @@ class RasterImage(ABC):
         Raises:
             OSError: If the file cannot be written.
         """
+
+    def declare_size(self, width: int, height: int) -> None:
+        """Tell the image, before :meth:`load`, how large the picture is.
+
+        Almost every format carries its own size and its reader ignores this.
+        It exists for input that does not: a pickled flat list of pixels is
+        ``width * height`` tuples with nothing to say which is which. It does
+        not set the dimensions; ``load`` does, and :class:`~walsh.task.Task`
+        checks the result against the declaration for every format, so a
+        declared size is honoured or verified, never silently dropped.
+
+        Args:
+            width: Declared width in pixels.
+            height: Declared height in pixels.
+
+        Raises:
+            ValueError: If either is not a positive integer.
+        """
+        for name, value in (("width", width), ("height", height)):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ValueError(f"declared {name} must be a positive integer, got {value!r}")
+        self._declared_size = (width, height)
 
     def get_dimensions(self) -> tuple[int, int]:
         """Return the image size.

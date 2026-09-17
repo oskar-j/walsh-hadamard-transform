@@ -32,6 +32,7 @@ from walsh.image.cim import (
 )
 from walsh.image.npy import NPY_CHANNELS, NPY_DTYPE, NPYImage
 from walsh.image.pam import PAM_DEPTH, PAM_MAGIC, PAM_TUPLTYPE, PAMImage
+from walsh.image.pkl import PICKLE_PROTOCOL, PickleImage, pixels_from_object, safe_loads
 from walsh.image.ppm import PPM_ASCII_MAGIC, PPM_BINARY_MAGIC, PPM_MAX_SAMPLE, PPMImage
 from walsh.image.tiff import TIFF_BIG_ENDIAN, TIFF_LITTLE_ENDIAN, TIFF_MAGIC, TIFFImage
 
@@ -48,6 +49,7 @@ __all__ = [
     "PAM_DEPTH",
     "PAM_MAGIC",
     "PAM_TUPLTYPE",
+    "PICKLE_PROTOCOL",
     "PPM_ASCII_MAGIC",
     "PPM_BINARY_MAGIC",
     "PPM_MAX_SAMPLE",
@@ -62,6 +64,7 @@ __all__ = [
     "NPYImage",
     "PAMImage",
     "PPMImage",
+    "PickleImage",
     "Pixel",
     "RasterImage",
     "TIFFImage",
@@ -71,16 +74,22 @@ __all__ = [
     "open_binary",
     "open_binary_read",
     "open_binary_write",
+    "pixels_from_object",
     "reader_for",
+    "safe_loads",
 ]
 
 #: Filename suffix to raster class. ``.pnm`` is the generic suffix for the
 #: older Netpbm formats and is treated as PPM, the only one of those
-#: supported; PAM has its own ``.pam``. ``.npy`` is a bare NumPy array.
+#: supported; PAM has its own ``.pam``. ``.npy`` is a bare NumPy array, and
+#: ``.pkl`` / ``.pickle`` a pickled array or list of pixels, read through an
+#: allowlist so that nothing in the file is executed.
 SUFFIXES: dict[str, type[RasterImage]] = {
     ".bmp": BMPImage,
     ".npy": NPYImage,
     ".pam": PAMImage,
+    ".pickle": PickleImage,
+    ".pkl": PickleImage,
     ".ppm": PPMImage,
     ".pnm": PPMImage,
     ".tif": TIFFImage,

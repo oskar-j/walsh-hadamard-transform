@@ -123,6 +123,7 @@ class Task:
         self._output: FileSource = None
         self._action: Action | None = None
         self._coeff_removal: float | None = None
+        self._input_size: tuple[int, int] | None = None
         self._y_block_size = y_block_size
         self._cb_block_size = cb_block_size
         self._cr_block_size = cr_block_size
@@ -229,6 +230,38 @@ class Task:
         except ValueError:
             valid = ", ".join(repr(a.value) for a in Action)
             raise ValueError(f"unknown action {action!r}; expected one of {valid}") from None
+        return self
+
+    def with_input_size(self, width: int | None, height: int | None) -> Task:
+        """Declare how large the input picture is, for input that cannot say.
+
+        Needed by exactly one kind of input: a pickled flat list of pixels,
+        ``[(r, g, b), ...]``, which does not carry its size. For any other
+        input the declaration is checked against the file, so it is honoured
+        or verified and never silently dropped. It applies to
+        :meth:`compress` only.
+
+        Args:
+            width: Width of the input in pixels, or ``None``.
+            height: Height of the input in pixels, or ``None``. Both or
+                neither; two ``None`` clear a previous declaration.
+
+        Returns:
+            This task, so calls can be chained.
+
+        Raises:
+            ValueError: If only one is given, or either is not a positive
+                integer.
+        """
+        if width is None and height is None:
+            self._input_size = None
+            return self
+        if width is None or height is None:
+            raise ValueError("width and height must be declared together")
+        for name, value in (("width", width), ("height", height)):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ValueError(f"input {name} must be a positive integer, got {value!r}")
+        self._input_size = (width, height)
         return self
 
     def with_coeff_removal(self, coeff: float | None) -> Task:
@@ -472,9 +505,16 @@ class Task:
         log.info("compressing %s -> %s", self._input, self._output)
 
         source_image = reader_for(self._input)
+        if self._input_size is not None:
+            source_image.declare_size(*self._input_size)
         source_image.load(self._input)
 
         width, height = source_image.get_dimensions()
+        if self._input_size is not None and self._input_size != (width, height):
+            raise ValueError(
+                f"{self._input} is {width}x{height}, not the "
+                f"{self._input_size[0]}x{self._input_size[1]} declared"
+            )
         self._check_fits_the_container(width, height)
         ycbcr = rgb_to_ycbcr(source_image.get_array().reshape(-1, 3))
 
@@ -519,6 +559,10 @@ class Task:
                 the ``.cim`` file is truncated or malformed.
             OSError: If either file cannot be opened.
         """
+        if self._input_size is not None:
+            raise ValueError(
+                "an input size applies to compress only: a .cim records its own dimensions"
+            )
         log.info("extracting %s -> %s", self._input, self._output)
 
         customizable_image = CustomizableImage.load(self._input)

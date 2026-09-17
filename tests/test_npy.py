@@ -109,16 +109,101 @@ def test_other_channel_counts_are_rejected_by_name(
         NPYImage().load(str(path))
 
 
-def test_a_pickled_object_array_is_refused_from_its_header_and_never_loaded(
-    tmp_path: Path,
-) -> None:
-    """np.load with pickling enabled executes arbitrary code. The reader must
-    never enable it, and refuses the file from the header's dtype alone."""
+class _RunsACommand:
+    def __init__(self, marker: Path) -> None:
+        self.marker = marker
+
+    def __reduce__(self) -> tuple[object, tuple[str]]:
+        import os
+
+        return os.system, (f"echo pwned > {self.marker}",)
+
+
+def test_a_hostile_object_array_is_refused_and_runs_nothing(tmp_path: Path) -> None:
+    """np.load with pickling enabled executes arbitrary code, and this reader
+    never enables it. Up to 0.4.14 an object array was refused from its header;
+    since 0.4.15 its pickled body goes through the allowlisted unpickler, which
+    refuses anything that is not data, by name, before calling it."""
+    marker = tmp_path / "pwned"
+    path = tmp_path / "evil.npy"
+    hostile = np.empty(1, dtype=object)
+    hostile[0] = _RunsACommand(marker)
+    with path.open("wb") as file:
+        np.save(file, hostile, allow_pickle=True)
+
+    with pytest.raises(
+        UnsupportedFileFormatError,
+        match=r"unsupported \.npy object array: it refers to \w+\.system.*ever executed",
+    ):
+        NPYImage().load(str(path))
+    assert not marker.exists()
+
+
+def test_an_object_array_that_is_not_pixels_is_refused_by_name(tmp_path: Path) -> None:
     path = tmp_path / "pickled.npy"
     with path.open("wb") as file:
         np.save(file, np.array([{"a": 1}, None], dtype=object), allow_pickle=True)
+    with pytest.raises(
+        UnsupportedFileFormatError, match=r"\.npy object array.*found a list of dict"
+    ):
+        NPYImage().load(str(path))
 
-    with pytest.raises(UnsupportedFileFormatError, match="dtype object"):
+
+@pytest.mark.parametrize("form", ["samples", "pixels"])
+def test_an_object_array_of_pixels_loads_like_a_pickle_of_them(form: str, tmp_path: Path) -> None:
+    """What numpy.save writes for dtype=object and only numpy.load(allow_pickle=True)
+    opens: (h, w, 3) of Python ints, or (h, w) of (r, g, b) tuples."""
+    expected = np.arange(2 * 3 * 3, dtype=np.uint8).reshape(2, 3, 3)
+    if form == "samples":
+        array = np.array(expected.tolist(), dtype=object)
+    else:
+        array = np.empty((2, 3), dtype=object)
+        for y in range(2):
+            for x in range(3):
+                array[y, x] = tuple(expected[y, x].tolist())
+    path = tmp_path / "object.npy"
+    with path.open("wb") as file:
+        np.save(file, array, allow_pickle=True)
+
+    image = NPYImage()
+    image.load(str(path))
+    assert image.get_dimensions() == (3, 2)
+    np.testing.assert_array_equal(image.get_array(), expected)
+
+
+def test_a_flat_object_array_of_pixels_needs_a_declared_size(tmp_path: Path) -> None:
+    expected = np.arange(2 * 3 * 3, dtype=np.uint8).reshape(2, 3, 3)
+    flat = np.empty(6, dtype=object)
+    for index, pixel in enumerate(expected.reshape(-1, 3).tolist()):
+        flat[index] = tuple(pixel)
+    path = tmp_path / "flat.npy"
+    with path.open("wb") as file:
+        np.save(file, flat, allow_pickle=True)
+
+    with pytest.raises(UnsupportedFileFormatError, match="does not say how wide"):
+        NPYImage().load(str(path))
+    image = NPYImage()
+    image.declare_size(3, 2)
+    image.load(str(path))
+    np.testing.assert_array_equal(image.get_array(), expected)
+
+
+@pytest.mark.parametrize("body", ["a list", "another shape"])
+def test_an_object_array_body_must_match_its_header(body: str, tmp_path: Path) -> None:
+    import io
+    import pickle
+
+    header = io.BytesIO()
+    np.lib.format.write_array_header_1_0(
+        header, {"descr": "|O", "fortran_order": False, "shape": (2, 3, 3)}
+    )
+    value: object = [[(1, 2, 3)]] if body == "a list" else np.zeros((1, 3, 3), dtype=object)
+    path = tmp_path / "mismatch.npy"
+    path.write_bytes(header.getvalue() + pickle.dumps(value, protocol=3))
+    with pytest.raises(
+        UnsupportedFileFormatError,
+        match=r"does not hold an array of the declared shape \(2, 3, 3\)",
+    ):
         NPYImage().load(str(path))
 
 

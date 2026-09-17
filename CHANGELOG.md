@@ -9,6 +9,64 @@ The `## [x.y.z]` headings are load-bearing: the release workflow extracts the
 section matching the version in `pyproject.toml` and uses it as the GitHub
 Release notes.
 
+## [0.4.15]
+
+### Added
+
+- `.pkl` and `.pickle` as an image format: pickled pixels in, and out. What a
+  file may hold: a NumPy array, under the `.npy` rules and at every pickle
+  protocol; rows of pixels, `[[(r, g, b), ...], ...]`; a flat list of pixels,
+  `[(r, g, b), ...]`; or `{"width": w, "height": h, "pixels": [...]}` around
+  any of them. Lists and tuples are interchangeable at every level. The writer
+  produces rows of `(r, g, b)` tuples of plain `int` at protocol 4, which any
+  Python loads without NumPy and whose bytes do not depend on the NumPy that
+  wrote them.
+- **Nothing in a pickle is ever executed.** `pickle.load` and
+  `numpy.load(allow_pickle=True)` run the program a pickle contains, so a
+  `walsh compress untrusted.pkl` built on them would run whatever the file
+  said. The same files are read here through an allowlist
+  (`walsh.image.safe_loads`): containers and numbers need no lookups, and the
+  only names a file may refer to are the ones NumPy's own pickles use to
+  rebuild an array. Anything else is refused by name before it is called.
+  `numpy.ndarray` resolves to an inert token rather than the class, so a file
+  cannot call it to allocate, and the array rebuilder accepts only the empty
+  array NumPy itself starts from. A pickle written under NumPy 1 loads under
+  NumPy 2 and the reverse, which `numpy.load` itself does not manage.
+- `--width` and `--height` on `walsh compress`, and `Task.with_input_size`,
+  for the one input that cannot say how large it is. A flat list of 160,000
+  pixels is 400x400 or 200x800 and nothing here guesses; without a size it is
+  refused with a message showing the three ways to give one. For every other
+  input, in any format, a declared size is checked against the file, so it is
+  honoured or verified and never silently dropped. `RasterImage.declare_size`
+  is the hook underneath.
+- `.npy` files holding an `object` array, which NumPy stores as a pickle and
+  only `numpy.load(allow_pickle=True)` opens, are read through the same
+  allowlist. Up to 0.4.14 they were refused from the header. `numpy.load` is
+  still never called with pickling enabled.
+- A table of contents in the README, generated from its headings.
+  `tests/test_readme_toc.py` fails when the two drift and regenerates the
+  block when run as a script.
+- Samples `data/earth.pkl`, a pickled array written under NumPy 2, and
+  `data/recreated.pkl`. Both are in the golden test, and `earth.pkl` is in
+  CI's byte-for-byte wheel smoke.
+
+### Changed
+
+- The array rules the `.npy` reader applied (dtype, shape, greyscale, opaque
+  RGBA) moved to `walsh.image._arrays` and are shared with the pickle reader.
+  Every `.npy` message is unchanged.
+
+### Notes
+
+- Samples must be integers in 0-255, Python's or NumPy's. Floats, booleans,
+  out-of-range values and ragged rows are refused by name rather than coerced:
+  a float could be scaled 0-1 or 0-255, and a cast would wrap 256 to 0.
+- The allowlist closes code execution. It does not make unpickling cheap: a
+  pickle of tuples costs about 8 bytes and one Python object per pixel, and a
+  genuine `MemoryError` is raised as itself, never relabelled as a bad file.
+- 485 to 608 tests, coverage 98.95% to 99.12%. Run locally on 3.10 through
+  3.14, and the pickle, `.npy` and golden tests under NumPy 1.26 as well as 2.
+
 ## [0.4.14]
 
 ### Added

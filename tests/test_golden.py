@@ -27,7 +27,9 @@ def _sample(name: str) -> Path:
     return path
 
 
-@pytest.mark.parametrize("source", ["earth.ppm", "earth.tiff", "earth.pam", "earth.npy"])
+@pytest.mark.parametrize(
+    "source", ["earth.ppm", "earth.tiff", "earth.pam", "earth.npy", "earth.pkl"]
+)
 def test_every_source_container_compresses_to_the_checked_in_cim(
     source: str, tmp_path: Path
 ) -> None:
@@ -40,7 +42,7 @@ def test_every_source_container_agrees_with_every_other_exactly(tmp_path: Path) 
     """Redundant with the test above while that one holds, and the separate
     signal when it does not: the source format cannot reach the arithmetic."""
     digests = set()
-    for source in ("earth.ppm", "earth.tiff", "earth.pam", "earth.npy"):
+    for source in ("earth.ppm", "earth.tiff", "earth.pam", "earth.npy", "earth.pkl"):
         output = tmp_path / f"{source}.cim"
         Task().with_action("compress").with_input(str(_sample(source))).with_output(
             str(output)
@@ -50,7 +52,8 @@ def test_every_source_container_agrees_with_every_other_exactly(tmp_path: Path) 
 
 
 @pytest.mark.parametrize(
-    "target", ["recreated.ppm", "recreated.tiff", "recreated.pam", "recreated.npy"]
+    "target",
+    ["recreated.ppm", "recreated.tiff", "recreated.pam", "recreated.npy", "recreated.pkl"],
 )
 def test_the_checked_in_cim_extracts_to_every_checked_in_reconstruction(
     target: str, tmp_path: Path
