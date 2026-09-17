@@ -9,6 +9,48 @@ The `## [x.y.z]` headings are load-bearing: the release workflow extracts the
 section matching the version in `pyproject.toml` and uses it as the GitHub
 Release notes.
 
+## [0.4.16]
+
+### Changed
+
+- `src/walsh/image` is no longer flat. The format modules are grouped by
+  family: `raster/` (BMP, TIFF), `netpbm/` (PPM, PAM and the sample code they
+  share) and `arrays/` (`.npy`, pickles and the array rules they share).
+  `base.py`, `_io.py` and `cim.py` stay at the top, since everything depends
+  on them. Nothing public moved: every class, constant and function is still
+  exported from `walsh.image` and `walsh`, and codec output is unchanged.
+- **The old module paths keep working.** `walsh.image.bmp`, `.tiff`, `.ppm`,
+  `.pam`, `.npy` and `.pkl` remain importable as aliases of the new modules,
+  so `from walsh.image.bmp import BMPImage` is unaffected. New code should
+  import from `walsh.image`. The two private modules, `_netpbm` and `_arrays`,
+  moved to `netpbm/_samples` and `arrays/_rules` without an alias.
+- `tests/` mirrors the source: `image/` with `raster/`, `netpbm/` and
+  `arrays/` inside it, `codec/`, `cli/`, `support/` and `project/`. The
+  520-line `test_image.py`, which mixed three subjects, is split along the
+  same lines into `image/raster/test_bmp.py`, `image/test_cim.py` and
+  `image/test_base.py`, with its one `align` test joining `image/test_io.py`.
+  The split was done on the syntax tree, so each test kept its decorators and
+  comments, and the count is unchanged: 608 before, 608 after.
+
+### Added
+
+- `tests/image/test_layout.py`: the old and new import paths, each checked as
+  the first import of a fresh interpreter, which is the only place an import
+  alias can honestly be tested; and that the family packages and
+  `walsh.image` export the same objects.
+- `pythonpath = ["tests"]` in the pytest configuration, so `from conftest
+  import ...` works at any depth, and a `ROOT` in `conftest.py` for tests that
+  need a repository path. Four tests counted `parent` hops and broke the
+  moment the folders appeared.
+
+### Notes
+
+- `MANIFEST.in` gains the `exclude data/*.pkl` line 0.4.15 should have added
+  beside the other sample suffixes. It changes nothing in practice: the sdist
+  ships no sample data at all, which was checked against the built archive.
+- 608 to 623 tests, coverage unchanged at 99.12%. Run locally on 3.10 through
+  3.14.
+
 ## [0.4.15]
 
 ### Added

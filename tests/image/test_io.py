@@ -169,3 +169,11 @@ def test_align_rounds_up() -> None:
     assert align(1, 4) == 4
     assert align(4, 4) == 4
     assert align(5, 4) == 8
+
+
+@pytest.mark.parametrize(
+    ("value", "alignment", "expected"),
+    [(1, 4, 4), (4, 4, 4), (5, 4, 8), (12, 4, 12), (13, 4, 16)],
+)
+def test_align(value: int, alignment: int, expected: int) -> None:
+    assert align(value, alignment) == expected

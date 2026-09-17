@@ -20,8 +20,8 @@ from typing import BinaryIO
 
 from walsh.exceptions import UnsupportedFileFormatError
 from walsh.image._io import FileSource, open_binary_read, open_binary_write
-from walsh.image._netpbm import NETPBM_MAX_SAMPLE, encode_samples, read_samples
 from walsh.image.base import RasterImage
+from walsh.image.netpbm._samples import NETPBM_MAX_SAMPLE, encode_samples, read_samples
 
 __all__ = ["PAM_DEPTH", "PAM_MAGIC", "PAM_TUPLTYPE", "PAMImage"]
 

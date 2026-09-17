@@ -22,7 +22,7 @@ expression away, ``array[..., ::-1]``.
 The header is validated before a byte of the body is read. An ``object``
 array, which NumPy stores as a pickle inside the ``.npy`` and only
 ``numpy.load(allow_pickle=True)`` will open, is read since 0.4.15 through the
-allowlisted unpickler of :mod:`walsh.image.pkl`, so nothing in it is executed
+allowlisted unpickler of :mod:`walsh.image.arrays.pkl`, so nothing in it is executed
 and ``numpy.load`` is still never called with pickling enabled; what it holds
 is then judged as a pickle of pixels would be. The writer always produces
 ``(height, width, 3)`` ``uint8`` in C order, so a file written here round-trips
@@ -38,10 +38,10 @@ from typing import BinaryIO, Literal
 import numpy as np
 
 from walsh.exceptions import UnsupportedFileFormatError
-from walsh.image._arrays import IMAGE_DTYPE, RGB_CHANNELS, to_rgb, validate_image_array
 from walsh.image._io import FileSource, open_binary_read, open_binary_write, read_up_to
+from walsh.image.arrays._rules import IMAGE_DTYPE, RGB_CHANNELS, to_rgb, validate_image_array
+from walsh.image.arrays.pkl import pixels_from_object, safe_loads
 from walsh.image.base import RasterImage
-from walsh.image.pkl import pixels_from_object, safe_loads
 
 __all__ = ["NPY_CHANNELS", "NPY_DTYPE", "NPYImage"]
 
@@ -111,7 +111,7 @@ class NPYImage(RasterImage):
 
         Runs on the header alone, before the body is read, so a file whose
         header declares a huge or hostile array costs nothing to refuse. The
-        rules are :func:`~walsh.image._arrays.validate_image_array`'s, shared
+        rules are :func:`~walsh.image.arrays._rules.validate_image_array`'s, shared
         with the pickle reader.
 
         Args:
@@ -137,7 +137,7 @@ class NPYImage(RasterImage):
 
         Raises:
             UnsupportedFileFormatError: If a four-channel array is not fully
-                opaque; see :func:`~walsh.image._arrays.to_rgb`.
+                opaque; see :func:`~walsh.image.arrays._rules.to_rgb`.
         """
         return to_rgb(array, _LABEL)
 

@@ -15,6 +15,7 @@ exclude data/*.bmp
 exclude data/*.ppm
 exclude data/*.pam
 exclude data/*.npy
+exclude data/*.pkl
 exclude data/*.tif
 exclude data/*.tiff
 exclude data/*.cim

@@ -10,11 +10,10 @@ Nothing read these files, so nothing noticed. This does.
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parent.parent
+from conftest import ROOT
 
 tomllib = pytest.importorskip("tomllib", reason="tomllib is stdlib from 3.11; CI runs 3.11+ too")
 

@@ -44,8 +44,8 @@ from typing import Any
 import numpy as np
 
 from walsh.exceptions import UnsupportedFileFormatError
-from walsh.image._arrays import IMAGE_DTYPE, to_rgb, validate_image_array
 from walsh.image._io import FileSource, open_binary_read, open_binary_write
+from walsh.image.arrays._rules import IMAGE_DTYPE, to_rgb, validate_image_array
 from walsh.image.base import RasterImage
 
 __all__ = ["PICKLE_PROTOCOL", "PickleImage", "pixels_from_object", "safe_loads"]

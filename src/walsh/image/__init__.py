@@ -5,23 +5,23 @@ Every raster format shares the contract described on
 file itself stores. :func:`reader_for` picks the class to use from a filename.
 
 This was a single ``image.py`` module up to 0.1.3; the names it exported are
-re-exported here, so existing imports keep working.
+re-exported here, so existing imports keep working. The format modules were
+siblings of this file up to 0.4.15 and are grouped by family since 0.4.16:
+:mod:`~walsh.image.raster` (BMP, TIFF), :mod:`~walsh.image.netpbm` (PPM, PAM)
+and :mod:`~walsh.image.arrays` (``.npy``, pickles). Their old paths, such as
+``walsh.image.bmp``, remain importable as aliases of the new ones.
 """
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from walsh.exceptions import UnsupportedFileFormatError
 from walsh.image._io import FileSource, align, open_binary, open_binary_read, open_binary_write
+from walsh.image.arrays.npy import NPY_CHANNELS, NPY_DTYPE, NPYImage
+from walsh.image.arrays.pkl import PICKLE_PROTOCOL, PickleImage, pixels_from_object, safe_loads
 from walsh.image.base import Pixel, RasterImage
-from walsh.image.bmp import (
-    BMP_HEADER_FORMAT,
-    BMP_HEADER_SIZE,
-    BMP_PIXEL_OFFSET,
-    BMP_SIGNATURE,
-    BMPImage,
-)
 from walsh.image.cim import (
     COEFF_DTYPE,
     MAX_BLOCK_SIZE,
@@ -30,11 +30,16 @@ from walsh.image.cim import (
     CustomizableImage,
     blocks_for,
 )
-from walsh.image.npy import NPY_CHANNELS, NPY_DTYPE, NPYImage
-from walsh.image.pam import PAM_DEPTH, PAM_MAGIC, PAM_TUPLTYPE, PAMImage
-from walsh.image.pkl import PICKLE_PROTOCOL, PickleImage, pixels_from_object, safe_loads
-from walsh.image.ppm import PPM_ASCII_MAGIC, PPM_BINARY_MAGIC, PPM_MAX_SAMPLE, PPMImage
-from walsh.image.tiff import TIFF_BIG_ENDIAN, TIFF_LITTLE_ENDIAN, TIFF_MAGIC, TIFFImage
+from walsh.image.netpbm.pam import PAM_DEPTH, PAM_MAGIC, PAM_TUPLTYPE, PAMImage
+from walsh.image.netpbm.ppm import PPM_ASCII_MAGIC, PPM_BINARY_MAGIC, PPM_MAX_SAMPLE, PPMImage
+from walsh.image.raster.bmp import (
+    BMP_HEADER_FORMAT,
+    BMP_HEADER_SIZE,
+    BMP_PIXEL_OFFSET,
+    BMP_SIGNATURE,
+    BMPImage,
+)
+from walsh.image.raster.tiff import TIFF_BIG_ENDIAN, TIFF_LITTLE_ENDIAN, TIFF_MAGIC, TIFFImage
 
 __all__ = [
     "BMP_HEADER_FORMAT",
@@ -95,6 +100,24 @@ SUFFIXES: dict[str, type[RasterImage]] = {
     ".tif": TIFFImage,
     ".tiff": TIFFImage,
 }
+
+#: Where each format module lived while this package was flat, up to 0.4.15.
+_MOVED = {
+    "bmp": "walsh.image.raster.bmp",
+    "tiff": "walsh.image.raster.tiff",
+    "ppm": "walsh.image.netpbm.ppm",
+    "pam": "walsh.image.netpbm.pam",
+    "npy": "walsh.image.arrays.npy",
+    "pkl": "walsh.image.arrays.pkl",
+}
+
+# Every new module is already imported above, so this only adds names: the
+# same module object answers to both paths, and `from walsh.image.bmp import
+# BMPImage` keeps working without a file of that name. Private modules moved
+# without an alias.
+for _old, _new in _MOVED.items():
+    sys.modules[f"{__name__}.{_old}"] = sys.modules[_new]
+    globals()[_old] = sys.modules[_new]
 
 #: Used when the format cannot be inferred: a path with no suffix, or ``None``
 #: for stdin. BMP because it was the only format before 0.2.0, so this is what

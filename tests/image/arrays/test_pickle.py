@@ -16,7 +16,7 @@ from walsh import PickleImage, Task
 from walsh.cli import main
 from walsh.exceptions import UnsupportedFileFormatError
 from walsh.image import PICKLE_PROTOCOL, pixels_from_object, reader_for, safe_loads
-from walsh.image import pkl as pkl_module
+from walsh.image.arrays import pkl as pkl_module
 
 WIDTH, HEIGHT = 5, 4
 
