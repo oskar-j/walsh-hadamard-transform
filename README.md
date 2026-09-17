@@ -199,13 +199,89 @@ Task().with_action("compress").with_input("data/image.bmp").with_output("out.cim
 Task().with_action("extract").with_input("out.cim").with_output("back.bmp").run()
 ```
 
-### Example
+#### Trying another transform
+
+`Task` takes the block transform as an instance, so a DCT, a Haar transform or
+anything else can reuse the whole pipeline — the colour conversion, the
+padding, the crop to the low-frequency corner, the container — with only the
+transform swapped. Subclass `Transform` and implement one block each way:
+
+```python
+import numpy as np
+from walsh import Task, Transform
+
+
+class Dct(Transform):
+    """The orthonormal DCT-II, the transform inside JPEG."""
+
+    @staticmethod
+    def matrix(edge):
+        k, i = np.arange(edge)[:, None], np.arange(edge)[None, :]
+        m = np.cos(np.pi * (2 * i + 1) * k / (2 * edge)) * np.sqrt(2 / edge)
+        m[0] /= np.sqrt(2)
+        return m
+
+    def transform(self, src):
+        m = self.matrix(src.shape[-1])
+        return m @ src @ m.T
+
+    def inverse_transform(self, src):
+        m = self.matrix(src.shape[-1])
+        return m.T @ src @ m
+
+
+Task(transform=Dct()).with_action("compress").with_input("data/earth.ppm").with_output(
+    "dct.cim"
+).run()
+Task(transform=Dct()).with_action("extract").with_input("dct.cim").with_output("back.ppm").run()
+```
+
+That is all a subclass needs. `Task` calls `transform_stack` and
+`inverse_transform_stack` with every block of a channel at once, and their
+defaults loop over the blocks; override them when the transform can take a
+whole `(count, edge, edge)` stack in one operation, as `@` can.
+`with_coeff_removal` is applied by the task, so it works for any transform.
+
+> **The `.cim` does not record which transform wrote it.** A file written with
+> anything but the default must be extracted by a `Task` given the same
+> transform. The `walsh` command never takes one, and will decode such a file
+> without complaint into a degraded picture. This keyword is for experiments,
+> not for files you hand to someone else.
+
+`examples/compare_transforms.py` runs three transforms over the Blue Marble
+sample. The byte count depends on the geometry alone, so each row is a
+like-for-like comparison of how much picture a transform packs into its first
+few coefficients:
+
+| Kept per axis | Bytes | Walsh-Hadamard | DCT-II | Haar |
+| ---: | ---: | ---: | ---: | ---: |
+| 2 | 30,026 | 21.59 dB | 22.29 dB | 21.59 dB |
+| 3 | 67,526 | 23.09 dB | 24.44 dB | 22.85 dB |
+| 4 | 120,026 | 25.07 dB | 26.45 dB | 25.07 dB |
+| 6 | 270,026 | 28.88 dB | 31.70 dB | 27.72 dB |
+| 8 | 480,026 | 42.70 dB | 43.65 dB | 42.70 dB |
+
+The DCT wins throughout, which is why JPEG uses it; Walsh-Hadamard needs no
+multiplications and, since 0.4.12, is exact. Haar ties Walsh-Hadamard wherever
+the kept size is a power of two, and that is mathematics rather than
+coincidence: the first 2, 4 or 8 Walsh functions and the first 2, 4 or 8 Haar
+functions span the same piecewise-constant subspace, so the two projections
+are the same picture.
+
+### Examples
 
 `examples/roundtrip.py` compresses the sample image, restores it, and plots
 both images with their histograms side by side (needs the `demo` extra):
 
 ```
 python examples/roundtrip.py
+```
+
+`examples/compare_transforms.py` prints the table above for any image, and
+needs numpy only:
+
+```
+python examples/compare_transforms.py [image]
 ```
 
 ## Requirements

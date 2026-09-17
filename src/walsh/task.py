@@ -21,7 +21,7 @@ from walsh.image import (
     blocks_for,
     reader_for,
 )
-from walsh.transforms import WalshHadamardTransform
+from walsh.transforms import Transform, WalshHadamardTransform, remove_small_coefficients
 
 __all__ = ["Action", "Task"]
 
@@ -57,6 +57,8 @@ class Task:
     :param cr_block_size: block edge used for the Cr channel.
     :param packed_block_size: how many low-frequency coefficients per axis are
         kept when writing. This is the codec's lossy knob.
+    :param transform: the block transform to use, for experiments. Not
+        recorded in the ``.cim``; see :meth:`__init__`.
     """
 
     def __init__(
@@ -66,6 +68,7 @@ class Task:
         cb_block_size: int = DEFAULT_CHROMA_BLOCK_SIZE,
         cr_block_size: int = DEFAULT_CHROMA_BLOCK_SIZE,
         packed_block_size: int = DEFAULT_PACKED_BLOCK_SIZE,
+        transform: Transform | None = None,
     ) -> None:
         """Create an unconfigured task with the default block geometry.
 
@@ -75,8 +78,23 @@ class Task:
             cr_block_size: Block edge used for the Cr channel.
             packed_block_size: How many low-frequency coefficients per axis are
                 kept when writing. This is the codec's lossy knob.
+            transform: The block transform both directions run, as an
+                instance of a :class:`~walsh.transforms.Transform` subclass;
+                ``None``, the default, is the Walsh-Hadamard transform. It
+                exists for experiments: a DCT or a Haar transform dropped in
+                reuses the colour conversion, the padding, the crop to the
+                packed corner and the container, so the comparison is between
+                transforms and nothing else. **The ``.cim`` does not record
+                which transform wrote it.** A file written with anything but
+                the default is a ``.cim`` in name only: it must be extracted
+                by a ``Task`` given the same transform, and the ``walsh``
+                command, which never takes one, will decode it without
+                complaint into the wrong picture.
 
         Raises:
+            TypeError: If ``transform`` is neither ``None`` nor a
+                :class:`~walsh.transforms.Transform` instance, such as the
+                class itself or a bare function.
             ValueError: If a block edge is not a power of two, or exceeds
                 ``MAX_BLOCK_SIZE``, or the packed size is not between 1 and the
                 smallest block edge. Each of those used to fail late and
@@ -89,6 +107,12 @@ class Task:
                 exit 0. The packed size need not be a power of two.
         """
         self._check_block_sizes(y_block_size, cb_block_size, cr_block_size, packed_block_size)
+        if transform is not None and not isinstance(transform, Transform):
+            raise TypeError(
+                f"transform must be a Transform instance, got {transform!r}; "
+                f"pass an instance of a walsh.transforms.Transform subclass"
+            )
+        self._transform: Transform = WalshHadamardTransform() if transform is None else transform
         self._input: FileSource = None
         self._output: FileSource = None
         self._action: Action | None = None
@@ -179,24 +203,56 @@ class Task:
         """Enable the second, independent lossy knob.
 
         Args:
-            coeff: Magnitude below which spectral coefficients are zeroed by
-                the transform, or ``None`` to keep every coefficient. Strict,
-                so a coefficient exactly equal to ``coeff`` is kept. It acts
-                on the *spectrum* of each block, never on the Hadamard matrix,
-                whose entries all share one magnitude; see
-                :class:`~walsh.transforms.WalshHadamardTransform`. The value
-                is absolute, so its effect scales with the block size, and it
-                is consumed only by :meth:`compress`: :meth:`extract` never
-                thresholds. A negative value is rejected when :meth:`run`
-                builds the transform, not here.
+            coeff: Magnitude below which spectral coefficients are zeroed,
+                or ``None`` to keep every coefficient. Strict, so a
+                coefficient exactly equal to ``coeff`` is kept. It acts on the
+                *spectrum* of each block, never on the Hadamard matrix, whose
+                entries all share one magnitude; see
+                :func:`~walsh.transforms.remove_small_coefficients`. The task
+                applies it to the output of whichever transform it was given,
+                so it works the same for a custom one. The value is absolute,
+                so its effect scales with the block size, and it is consumed
+                only by :meth:`compress`: :meth:`extract` never thresholds.
 
         Returns:
             This task, so calls can be chained.
+
+        Raises:
+            ValueError: If ``coeff`` is negative. It is compared against a
+                magnitude, so a negative value could only be a mistake: it
+                would silently keep everything.
         """
+        if coeff is not None and coeff < 0:
+            raise ValueError(f"coeff must be non-negative, got {coeff}")
         self._coeff_removal = coeff
         return self
 
     # -- helpers ---------------------------------------------------------
+
+    def _same_shape(self, result: Block, given: Block, method: str) -> Block:
+        """Return ``result`` as an array, insisting it has the shape of ``given``.
+
+        The built-in transform cannot fail this; it is for a custom one, where
+        a wrong shape would otherwise surface far away as a container error.
+
+        Args:
+            result: What the transform returned.
+            given: The stack it was given.
+            method: The method that returned it, for the message.
+
+        Returns:
+            ``result`` as a ``float64`` array.
+
+        Raises:
+            ValueError: If the shapes differ, naming the transform's class.
+        """
+        array = np.asarray(result, dtype=np.float64)
+        if array.shape != given.shape:
+            raise ValueError(
+                f"{type(self._transform).__name__}.{method} returned shape {array.shape} "
+                f"for a stack of shape {given.shape}"
+            )
+        return array
 
     @staticmethod
     def _get_padding_size(x: int, a: int) -> int:
@@ -398,11 +454,16 @@ class Task:
 
         # Each channel is one stack and the transform takes a stack as it is:
         # no list of blocks is built, re-stacked or split anywhere in between.
-        transform = WalshHadamardTransform(self._coeff_removal)
-        spectral = {
-            channel: transform.transform(channel_blocks)
-            for channel, channel_blocks in blocks.items()
-        }
+        # Coefficient removal is applied here rather than by the transform, so
+        # it works for whichever transform the task was given.
+        spectral: dict[str, Block] = {}
+        for channel, channel_blocks in blocks.items():
+            spectrum = self._same_shape(
+                self._transform.transform_stack(channel_blocks), channel_blocks, "transform_stack"
+            )
+            if self._coeff_removal is not None:
+                spectrum = remove_small_coefficients(spectrum, self._coeff_removal)
+            spectral[channel] = spectrum
 
         packed = self._packed_block_size
         customizable_image = CustomizableImage()
@@ -430,7 +491,6 @@ class Task:
 
         customizable_image = CustomizableImage.load(self._input)
         width, height = customizable_image.get_dimensions()
-        transform = WalshHadamardTransform()
 
         neutral = {"y": NEUTRAL_LUMA, "cb": NEUTRAL_CHROMA, "cr": NEUTRAL_CHROMA}
 
@@ -441,7 +501,12 @@ class Task:
                 log.debug("channel %s is empty, filling with %d", channel, fill)
                 planes[channel] = np.full(width * height, float(fill))
                 continue
-            merged = self._merge(transform.inverse_transform(spectral), width, height)
+            restored = self._same_shape(
+                self._transform.inverse_transform_stack(spectral),
+                spectral,
+                "inverse_transform_stack",
+            )
+            merged = self._merge(restored, width, height)
             planes[channel] = merged.reshape(-1)
 
         ycbcr = np.stack([planes["y"], planes["cb"], planes["cr"]], axis=1)
@@ -468,10 +533,11 @@ class Task:
         if self._action is None:
             raise ValueError("no action selected; call with_action() first")
         log.debug(
-            "run action=%s input=%s output=%s coeff_removal=%s",
+            "run action=%s input=%s output=%s coeff_removal=%s transform=%s",
             self._action.value,
             self._input,
             self._output,
             self._coeff_removal,
+            type(self._transform).__name__,
         )
         Task._ACTIONS[self._action](self)

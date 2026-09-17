@@ -16,7 +16,12 @@ import numpy.typing as npt
 
 from walsh.decorators import cached
 
-__all__ = ["Transform", "WalshHadamardTransform", "hadamard_matrix"]
+__all__ = [
+    "Transform",
+    "WalshHadamardTransform",
+    "hadamard_matrix",
+    "remove_small_coefficients",
+]
 
 Block = npt.NDArray[np.float64]
 
@@ -26,7 +31,24 @@ _SYLVESTER_SEED = np.array([[1.0, 1.0], [1.0, -1.0]])
 
 
 class Transform(ABC):
-    """A block transform and its inverse."""
+    """A block transform and its inverse.
+
+    Subclass this to run another transform through the codec's pipeline with
+    ``Task(transform=...)``: a DCT or a Haar transform at the same block
+    geometry, say, to compare against Walsh-Hadamard. Only :meth:`transform`
+    and :meth:`inverse_transform` are required, and they see one square block
+    at a time. :meth:`transform_stack` and :meth:`inverse_transform_stack` are
+    what :class:`~walsh.task.Task` actually calls, with every block of a
+    channel at once; their defaults loop over the blocks, which is correct for
+    any subclass and slow on a large image, so override them when the
+    transform can take a whole ``(count, edge, edge)`` stack in one operation.
+
+    Two things the ``.cim`` container asks of a transform. A block must come
+    back the same shape it went in. And coefficients are stored rounded to
+    ``int16``: an orthonormal transform of 8-bit samples cannot exceed
+    ``edge * 255``, which fits at every edge ``Task`` accepts, but a transform
+    with a larger gain will saturate silently.
+    """
 
     @abstractmethod
     def transform(self, src: Block) -> Block:
@@ -49,6 +71,42 @@ class Transform(ABC):
         Returns:
             The reconstructed samples, the same shape as ``src``.
         """
+
+    def transform_stack(self, stack: Block) -> Block:
+        """Transform every block of a ``(count, edge, edge)`` stack.
+
+        The default calls :meth:`transform` once per block. Override it when
+        the transform can take the whole stack in one array operation.
+
+        Args:
+            stack: The blocks, stacked along the first axis.
+
+        Returns:
+            The spectra, the same shape as ``stack``.
+
+        Raises:
+            ValueError: If ``stack`` is not 3-D, or :meth:`transform` returns
+                a block of a different shape from the one it was given.
+        """
+        return _per_block(self.transform, stack, f"{type(self).__name__}.transform")
+
+    def inverse_transform_stack(self, stack: Block) -> Block:
+        """Invert the transform for every block of a ``(count, edge, edge)`` stack.
+
+        The default calls :meth:`inverse_transform` once per block. See
+        :meth:`transform_stack`.
+
+        Args:
+            stack: The spectra, stacked along the first axis.
+
+        Returns:
+            The reconstructed blocks, the same shape as ``stack``.
+
+        Raises:
+            ValueError: If ``stack`` is not 3-D, or :meth:`inverse_transform`
+                returns a block of a different shape from the one it was given.
+        """
+        return _per_block(self.inverse_transform, stack, f"{type(self).__name__}.inverse_transform")
 
     def transform_sequence(self, src_seq: Iterable[Block]) -> list[Block]:
         """Transform every block in a sequence.
@@ -195,7 +253,7 @@ class WalshHadamardTransform(Transform):
         spectrum = self._spectrum(src)
         if self._coeff is None:
             return spectrum
-        return np.where(np.abs(spectrum) < self._coeff, 0.0, spectrum)
+        return remove_small_coefficients(spectrum, self._coeff)
 
     def inverse_transform(self, src: Block) -> Block:
         """Invert the transform by applying the matrix again.
@@ -216,6 +274,34 @@ class WalshHadamardTransform(Transform):
             ValueError: If ``src`` is not a square block or a stack of them.
         """
         return self._spectrum(src)
+
+    def transform_stack(self, stack: Block) -> Block:
+        """Transform a whole stack in one broadcast matrix product.
+
+        Args:
+            stack: The blocks, stacked along the first axis.
+
+        Returns:
+            The spectra, the same shape as ``stack``.
+
+        Raises:
+            ValueError: If ``stack`` is not a stack of square blocks.
+        """
+        return self.transform(stack)
+
+    def inverse_transform_stack(self, stack: Block) -> Block:
+        """Invert a whole stack in one broadcast matrix product.
+
+        Args:
+            stack: The spectra, stacked along the first axis.
+
+        Returns:
+            The reconstructed blocks, the same shape as ``stack``.
+
+        Raises:
+            ValueError: If ``stack`` is not a stack of square blocks.
+        """
+        return self.inverse_transform(stack)
 
     def transform_sequence(self, src_seq: Iterable[Block]) -> list[Block]:
         """Transform every block in a sequence with one batched call.
@@ -338,6 +424,56 @@ def _hadamard_signs(size: int) -> Block:
         sequency order.
     """
     return np.sign(hadamard_matrix(size)).astype(np.float64)
+
+
+def remove_small_coefficients(spectrum: Block, coeff: float) -> Block:
+    """Zero every spectral coefficient whose magnitude is strictly below ``coeff``.
+
+    The codec's second lossy knob, as one function so that
+    :class:`WalshHadamardTransform` and :class:`~walsh.task.Task`, which
+    applies it after whatever transform it was given, cannot drift apart.
+
+    Args:
+        spectrum: Spectral coefficients, any shape.
+        coeff: The threshold, as an absolute magnitude. A coefficient exactly
+            equal to it is kept.
+
+    Returns:
+        A new array the same shape as ``spectrum``.
+    """
+    thinned: Block = np.where(np.abs(spectrum) < coeff, 0.0, spectrum)
+    return thinned
+
+
+def _per_block(apply: Callable[[Block], Block], stack: Block, name: str) -> Block:
+    """Run a single-block operation over every block of a stack.
+
+    Args:
+        apply: Takes one square block and returns one of the same shape.
+        stack: The blocks, stacked along the first axis.
+        name: What to call ``apply`` in an error message.
+
+    Returns:
+        The results, the same shape as ``stack``. An empty stack comes back
+        empty without ``apply`` being called.
+
+    Raises:
+        ValueError: If ``stack`` is not 3-D, or ``apply`` returns a block of a
+            different shape. The shape is compared rather than left to
+            broadcasting, which would quietly spread a scalar over the block.
+    """
+    stack = np.asarray(stack, dtype=np.float64)
+    if stack.ndim != 3:
+        raise ValueError(f"expected a (count, edge, edge) stack, got shape {stack.shape}")
+    result = np.empty_like(stack)
+    for index, block in enumerate(stack):
+        transformed = np.asarray(apply(block), dtype=np.float64)
+        if transformed.shape != block.shape:
+            raise ValueError(
+                f"{name} returned shape {transformed.shape} for a block of shape {block.shape}"
+            )
+        result[index] = transformed
+    return result
 
 
 def _apply_batched(apply: Callable[[Block], Block], src_seq: Iterable[Block]) -> list[Block]:

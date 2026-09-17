@@ -9,6 +9,53 @@ The `## [x.y.z]` headings are load-bearing: the release workflow extracts the
 section matching the version in `pyproject.toml` and uses it as the GitHub
 Release notes.
 
+## [0.4.13]
+
+### Added
+
+- `Task(transform=...)`: the block transform is a constructor keyword taking a
+  `Transform` instance, so a DCT, a Haar transform or anything else can reuse
+  the whole pipeline — colour conversion, padding, the crop to the packed
+  corner, the container — with only the transform swapped (#41). The default
+  is the Walsh-Hadamard transform and its output is byte-identical to 0.4.12.
+  Anything that is not a `Transform` instance is a `TypeError` at
+  construction, before any file is opened. **Library only, on purpose: the
+  `.cim` does not record which transform wrote it**, so a file written with a
+  custom one must be extracted by a `Task` given the same one; the `walsh`
+  command decodes it without complaint into a degraded picture (16 dB worse
+  in the test that pins this). The keyword is for experiments.
+- `Transform.transform_stack` and `Transform.inverse_transform_stack`, which
+  are what `Task` calls, with every block of a channel at once. A subclass
+  only has to implement the two single-block methods: the defaults loop over
+  the blocks and reject a block that comes back another shape, by name. The
+  built-in transform overrides both with its one broadcast product, so its
+  path is as vectorised as before.
+- `walsh.transforms.remove_small_coefficients`, the coefficient-removal
+  threshold as one function shared by `Task` and `WalshHadamardTransform`.
+- `examples/compare_transforms.py`: Walsh-Hadamard, DCT-II and Haar over any
+  image at five kept sizes, numpy only. The byte count depends on the
+  geometry alone, so each row is like for like. On the Blue Marble sample the
+  DCT leads by 0.7 to 2.8 dB, and Haar ties Walsh-Hadamard exactly wherever
+  the kept size is a power of two, because the first 2, 4 or 8 functions of
+  each span the same piecewise-constant subspace. The table is in the README
+  and the test suite runs the example.
+
+### Changed
+
+- Coefficient removal is applied by `Task` to the output of whichever
+  transform it was given, rather than by handing the threshold to the
+  built-in transform, so `with_coeff_removal` works for any transform. The
+  bytes written are unchanged, and `WalshHadamardTransform(coeff=...)` still
+  works on its own; a test holds the two routes to the same output.
+- `Task.with_coeff_removal` rejects a negative threshold when it is set. It
+  used to be rejected only when `run()` built the transform. The command line
+  reports it the same way either way.
+
+### Notes
+
+- 426 to 447 tests, coverage 98.86% to 98.90%. Run locally on 3.10 through
+  3.14.
+
 ## [0.4.12]
 
 ### Changed
