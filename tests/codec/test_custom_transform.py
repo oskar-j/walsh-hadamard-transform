@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 from click.testing import CliRunner
 
-from conftest import write_ppm
+from conftest import ROOT, write_ppm
 from walsh import (
     DiscreteCosineTransform,
     HaarTransform,
@@ -25,7 +25,7 @@ from walsh.cli import main
 from walsh.transforms import Block, remove_small_coefficients
 
 HEADER = 26
-EXAMPLE = Path(__file__).resolve().parent.parent / "examples" / "compare_transforms.py"
+EXAMPLE = ROOT / "examples" / "compare_transforms.py"
 
 
 def _dct_matrix(edge: int) -> Block:

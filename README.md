@@ -346,7 +346,7 @@ The package needs `numpy` and `click` -- BMP parsing is done by hand with
 `Pillow` are needed only by the example script, and are declared as the `demo`
 extra. Versions are pinned in `pyproject.toml`;
 `requirements.txt`, `requirements-demo.txt` and `requirements-dev.txt` mirror
-them for plain `pip install -r` workflows, and `tests/test_requirements_mirror.py`
+them for plain `pip install -r` workflows, and `tests/project/test_requirements_mirror.py`
 fails if the two ever disagree. On pip 25.1 or newer,
 `pip install -e ".[demo]" --group dev` reads the same groups straight from
 `pyproject.toml` and needs no mirror at all.

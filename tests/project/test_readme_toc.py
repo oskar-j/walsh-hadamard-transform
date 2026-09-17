@@ -3,7 +3,7 @@
 A hand-kept list of links goes stale the first time a heading is renamed, and
 a dead anchor fails silently on GitHub. Regenerate the block with::
 
-    python tests/test_readme_toc.py
+    python tests/project/test_readme_toc.py
 """
 
 from __future__ import annotations
@@ -13,7 +13,9 @@ from pathlib import Path
 
 import pytest
 
-README = Path(__file__).resolve().parent.parent / "README.md"
+# Counted from this file rather than taken from conftest, because this module
+# is also run as a script, where conftest is not importable.
+README = Path(__file__).resolve().parents[2] / "README.md"
 BEGIN, END = "<!-- toc -->", "<!-- /toc -->"
 TOC_HEADING = "Contents"
 
@@ -57,7 +59,7 @@ def test_the_table_of_contents_matches_the_headings() -> None:
         pytest.skip("README.md missing")
     text = README.read_text(encoding="utf-8")
     assert current_toc(text) == build_toc(text), (
-        "README.md headings changed: run `python tests/test_readme_toc.py` to regenerate"
+        "README.md headings changed: run `python tests/project/test_readme_toc.py` to regenerate"
     )
 
 

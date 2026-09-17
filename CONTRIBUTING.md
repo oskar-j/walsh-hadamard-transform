@@ -107,9 +107,14 @@ more detail.
 
 ## Adding an image format
 
-Add a submodule under `src/walsh/image/` with a class subclassing
-`RasterImage`, implementing `load` and `save`, and add its filename suffix to
-`SUFFIXES` in `src/walsh/image/__init__.py`. Convert to and from the in-memory
+Add a module to the family folder it belongs to under `src/walsh/image/` —
+`raster/` for picture formats with their own header, `netpbm/` for the Netpbm
+family, `arrays/` for pixel data that is not a picture format, or a new folder
+for a new family — with a class subclassing `RasterImage`, implementing `load`
+and `save`. Import it in `src/walsh/image/__init__.py`, add its filename suffix
+to `SUFFIXES` there, and put its tests in the matching folder under
+`tests/image/`. Test folders have no `__init__.py`, so give the test module a
+name no other test module has. Convert to and from the in-memory
 contract inside that class: decode with `np.frombuffer` and hand `set_array` a
 `(height, width, 3)` `uint8` array, and serialise from `get_array()`. Never
 build a list of tuples on the way — routing one through `np.asarray` is slower

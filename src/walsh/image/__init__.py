@@ -5,7 +5,11 @@ Every raster format shares the contract described on
 file itself stores. :func:`reader_for` picks the class to use from a filename.
 
 This was a single ``image.py`` module up to 0.1.3; the names it exported are
-re-exported here, so existing imports keep working.
+re-exported here, so existing imports keep working. The format modules are
+grouped by family: :mod:`~walsh.image.raster` (BMP, TIFF),
+:mod:`~walsh.image.netpbm` (PPM, PAM) and :mod:`~walsh.image.arrays` (``.npy``,
+pickles). Import their classes from this package rather than from those
+modules, whose paths are an implementation detail.
 """
 
 from __future__ import annotations
@@ -14,14 +18,9 @@ from pathlib import Path
 
 from walsh.exceptions import UnsupportedFileFormatError
 from walsh.image._io import FileSource, align, open_binary, open_binary_read, open_binary_write
+from walsh.image.arrays.npy import NPY_CHANNELS, NPY_DTYPE, NPYImage
+from walsh.image.arrays.pkl import PICKLE_PROTOCOL, PickleImage, pixels_from_object, safe_loads
 from walsh.image.base import Pixel, RasterImage
-from walsh.image.bmp import (
-    BMP_HEADER_FORMAT,
-    BMP_HEADER_SIZE,
-    BMP_PIXEL_OFFSET,
-    BMP_SIGNATURE,
-    BMPImage,
-)
 from walsh.image.cim import (
     COEFF_DTYPE,
     MAX_BLOCK_SIZE,
@@ -30,11 +29,16 @@ from walsh.image.cim import (
     CustomizableImage,
     blocks_for,
 )
-from walsh.image.npy import NPY_CHANNELS, NPY_DTYPE, NPYImage
-from walsh.image.pam import PAM_DEPTH, PAM_MAGIC, PAM_TUPLTYPE, PAMImage
-from walsh.image.pkl import PICKLE_PROTOCOL, PickleImage, pixels_from_object, safe_loads
-from walsh.image.ppm import PPM_ASCII_MAGIC, PPM_BINARY_MAGIC, PPM_MAX_SAMPLE, PPMImage
-from walsh.image.tiff import TIFF_BIG_ENDIAN, TIFF_LITTLE_ENDIAN, TIFF_MAGIC, TIFFImage
+from walsh.image.netpbm.pam import PAM_DEPTH, PAM_MAGIC, PAM_TUPLTYPE, PAMImage
+from walsh.image.netpbm.ppm import PPM_ASCII_MAGIC, PPM_BINARY_MAGIC, PPM_MAX_SAMPLE, PPMImage
+from walsh.image.raster.bmp import (
+    BMP_HEADER_FORMAT,
+    BMP_HEADER_SIZE,
+    BMP_PIXEL_OFFSET,
+    BMP_SIGNATURE,
+    BMPImage,
+)
+from walsh.image.raster.tiff import TIFF_BIG_ENDIAN, TIFF_LITTLE_ENDIAN, TIFF_MAGIC, TIFFImage
 
 __all__ = [
     "BMP_HEADER_FORMAT",

@@ -10,7 +10,7 @@ uv-first; `uv.lock` is committed and CI syncs from it.
 uv sync --group dev --all-extras         # dev setup; requires Python 3.10+
 uv run pytest                            # full suite
 uv run pytest --cov --cov-report=term-missing   # with coverage (floor 90%)
-uv run pytest tests/test_task.py -k roundtrip   # single test / pattern
+uv run pytest tests/codec/test_task.py -k roundtrip   # single test / pattern
 uv run ruff check . && uv run ruff format .
 uv run mypy                              # strict; config selects the walsh package
 uv build                                 # sdist + wheel
@@ -54,8 +54,41 @@ exists, so aliases count. It belongs in the CLI, not in `Task`, whose
 installed package, so an editable install must exist before `pytest` will work.
 `tests/conftest.py` exposes `write_bmp`, `write_ppm`, `write_pam`, `write_tiff`
 and `write_npy` helpers plus `gradient_*` and `sample_*` fixtures per format; test
-modules import the helpers as `from conftest import ...`, which works because
-pytest puts `tests/` on `sys.path`.
+modules import the helpers as `from conftest import ...`, which works at any
+depth because `[tool.pytest.ini_options] pythonpath = ["tests"]` says so.
+
+Neither tree is flat (0.4.16). The tests mirror the source:
+
+```
+src/walsh/image/            tests/
+  __init__.py  registry       conftest.py        helpers, fixtures, ROOT, DATA_DIR
+  base.py      RasterImage    image/             test_base, test_cim, test_io,
+  _io.py       staged writes                     test_streams, test_layout
+  cim.py       the container    raster/          test_bmp, test_tiff
+  raster/      bmp, tiff        netpbm/          test_ppm, test_pam
+  netpbm/      ppm, pam,        arrays/          test_npy, test_pickle
+               _samples       codec/             test_task, test_transforms,
+  arrays/      npy, pkl,                         test_custom_transform,
+               _rules                            test_colors, test_golden
+                              cli/               test_cli
+                              support/           test_decorators, test_exceptions
+                              project/           test_requirements_mirror,
+                                                 test_readme_toc
+```
+
+Three rules keep that working. Test folders have **no `__init__.py`**, so
+every test module's basename must be unique across the tree, and there must
+be no second `conftest.py`. A test that needs a repository path takes `ROOT`
+or `DATA_DIR` from `conftest` instead of counting `parent` hops, which broke
+for four files the day the folders appeared; `test_readme_toc.py` is the one
+exception, because it also runs as a script. And **`walsh.image` is the
+import path; where a class lives below it is an implementation detail.** The
+flat paths of 0.4.15 and earlier (`walsh.image.bmp` and its siblings) were
+dropped in the move rather than aliased: compatibility scaffolding would
+have made the source narrate its own history, and every documented import
+already went through `walsh.image` or `walsh`. `test_layout.py` pins the
+exports, each path checked as the first import of a fresh interpreter, which
+is where an import cycle between the family packages would show.
 
 ## Architecture
 
@@ -105,7 +138,8 @@ the plane (0.4.7). Do not reintroduce a per-pixel or per-block Python loop, a
 `list(stack)`, or an `np.stack` of views here: pixel marshalling was half the
 codec's wall time up to 0.4.9.
 
-**`image/`** — a package, one submodule per format. `base.py` defines
+**`image/`** — a package, one module per format, grouped by family into
+`raster/`, `netpbm/` and `arrays/` (see Layout). `base.py` defines
 `RasterImage` and **the contract that matters: RGB pixels, top row first,
 whatever the file stores**. The store is one `(n, 3)` `uint8` array (0.4.10,
 #27); `get_array()` / `set_array()` are the primary accessors and hand out a
@@ -141,7 +175,7 @@ name. The header is parsed with `np.lib.format.read_magic` /
 `read_array_header_1_0` and validated **before** the body is read. `np.load`
 is never called with pickling enabled; an `object` array, whose body is a
 pickle, goes through `pkl.safe_loads` since 0.4.15 and is then judged as a
-pickle of pixels would be. The array rules themselves live in `_arrays.py`
+pickle of pixels would be. The array rules themselves live in `arrays/_rules.py`
 (`validate_image_array`, `to_rgb`), shared with the pickle reader, and take a
 label so each format's messages name it. Versions 1.0 and 2.0 are accepted; 3.0 exists only for
 structured dtypes and is rejected by name. The writer is `np.save` of a
@@ -182,7 +216,7 @@ plain `int` at protocol 4: loadable without NumPy, and byte-stable across
 NumPy versions, which a pickled array is not. `data/earth.pkl` is a pickled
 array written under NumPy 2 and is in the golden test and the CI `cmp` loop.
 
-`_netpbm.py` holds what PPM and PAM share, since their rasters are identical
+`netpbm/_samples.py` holds what PPM and PAM share, since their rasters are identical
 behind different headers: the one-byte sample decoder (one read, a lookup-table
 rescale when `maxval` is below 255, tuples built by `zip` in C; samples above
 `maxval` are rejected by name) and the encoder (`bytes` over a chained
@@ -248,9 +282,11 @@ a non-regular destination (`/dev/null`, a FIFO) is opened directly because it
 cannot be replaced, and the mode is copied from the destination or derived
 from the umask, since `mkstemp` creates `0o600`.
 
-Adding a format means a new submodule subclassing `RasterImage` plus an entry in
-`SUFFIXES`. Honour the RGB top-down contract there, not in `Task`. The contract
-is what makes the source format irrelevant to the output: `tests/test_task.py`
+Adding a format means a new module in the family folder it belongs to (or a
+new folder, for a new family), subclassing `RasterImage`, plus an import and an
+entry in `SUFFIXES` in `image/__init__.py` and a test module in the matching
+`tests/image/` folder. Honour the RGB top-down contract there, not in `Task`. The contract
+is what makes the source format irrelevant to the output: `tests/codec/test_task.py`
 asserts that BMP, PPM, PAM and TIFF of one picture compress to byte-identical
 `.cim`.
 
@@ -264,7 +300,7 @@ method pinned every `WalshHadamardTransform` instance forever (fixed in 0.2.1).
 products with `[[1, 1], [1, -1]]`, then the sequency sort — and it rejects a
 `size` that is not a power of two. The scale is applied by multiplication, not
 division, so every entry is bit-identical to the pre-0.4.0 triple loop;
-`tests/test_transforms.py` keeps that loop as an oracle and asserts byte
+`tests/codec/test_transforms.py` keeps that loop as an oracle and asserts byte
 equality. Do not "simplify" to `h / np.sqrt(size)`.
 
 `transform` is mathematically `h @ src @ h` then, if `coeff` is set, zeroing
@@ -287,7 +323,7 @@ them moves the handful of coefficients that sit within `1e-9` of a half.
 A butterfly (fast Walsh-Hadamard transform) was measured for #39 and rejected
 for the runtime: in numpy it is about eight times slower than the matrix
 product at the codec's block sizes because every pass materialises
-temporaries. It lives on in `tests/test_transforms.py` as the oracle, since
+temporaries. It lives on in `tests/codec/test_transforms.py` as the oracle, since
 it adds the same samples in a completely different order and can only agree
 bit for bit with the matrix products when neither rounds anywhere. `inverse_transform` applies only the matrix — repeating the
 threshold would discard reconstructed detail twice, so the two are no longer
@@ -301,7 +337,7 @@ blocks through `_per_block`, which compares shapes explicitly because
 assignment would broadcast a scalar over a block, and `WalshHadamardTransform`
 overrides both with its one broadcast product. That override is what keeps the
 built-in path vectorised; `examples/compare_transforms.py` shows a subclass
-doing the same, and `tests/test_custom_transform.py` runs that example.
+doing the same, and `tests/codec/test_custom_transform.py` runs that example.
 
 `MatrixTransform` (0.4.14) is the public base for a separable orthonormal
 transform given by one matrix: `m @ src @ m.T`, inverse by the transpose,
@@ -311,7 +347,7 @@ whose arrays are read-only because every caller shares them. `TRANSFORMS` is
 the name registry; adding a transform means a class and an entry there.
 **Only Walsh-Hadamard is bit-exact.** The DCT and Haar matrices are
 irrational, so their products round and the rounding follows the BLAS: never
-pin their output byte for byte, and never add them to `tests/test_golden.py`
+pin their output byte for byte, and never add them to `tests/codec/test_golden.py`
 or the CI `cmp` smoke. Their tests assert properties with margins instead
 (orthonormality, round trip, the DCT beating Walsh by over 1 dB on a smooth
 picture, Haar tying Walsh at kept sizes 2, 4 and 8 and parting at 3 and 6).
@@ -370,7 +406,7 @@ On a 2000×2000 image, `compress` takes about 1.0 s and 490 MB peak and
 What remains of the memory is the float64 working set of the transform (the
 YCbCr planes and the coefficient stacks at 8 bytes a sample), which is a
 different matter from the contract and would need a dtype decision, not more
-vectorisation. `tests/test_golden.py` pins the checked-in outputs byte for byte; run it
+vectorisation. `tests/codec/test_golden.py` pins the checked-in outputs byte for byte; run it
 first after any change on the pixel path. **Byte-identical means exactly
 that since 0.4.12:** on every platform and BLAS library, in both directions,
 because the transform's arithmetic is exact (see `transforms.py` above).
@@ -408,10 +444,10 @@ runs its tests from inside, the only check that can catch a `MANIFEST.in`
 regression, and smoke-tests the wheel against the reference `.cim` for every
 container and the reference decode, byte for byte. A `force_publish` retry of the release downloads the assets on the
 existing GitHub Release rather than rebuilding, so PyPI gets the same bytes.
-`tests/test_requirements_mirror.py` keeps `requirements*.txt` equal to
-`pyproject.toml` (#24), and `tests/test_readme_toc.py` keeps the README's
+`tests/project/test_requirements_mirror.py` keeps `requirements*.txt` equal to
+`pyproject.toml` (#24), and `tests/project/test_readme_toc.py` keeps the README's
 table of contents equal to its headings: after renaming or adding a heading,
-run `python tests/test_readme_toc.py` to regenerate the block between the
+run `python tests/project/test_readme_toc.py` to regenerate the block between the
 `<!-- toc -->` markers.
 
 ## Coverage gate
@@ -437,9 +473,11 @@ in the `pypi` GitHub environment — no API token in the repo.
 So: cutting a release means bumping the version *and* adding its CHANGELOG
 section in the same merge. The `## [x.y.z]` headings are load-bearing.
 
-`MANIFEST.in` controls the sdist. It exists mainly because setuptools ships
-`tests/test_*.py` but not `tests/conftest.py`, which would produce a sdist whose
-tests all error on missing fixtures.
+`MANIFEST.in` controls the sdist. It exists mainly because setuptools on its
+own ships only `tests/test_*.py`: not `tests/conftest.py`, and not the test
+modules in subfolders, which would produce a sdist whose tests are mostly
+missing and whose remainder errors on absent fixtures. `recursive-include
+tests *.py` covers both, and CI's in-sdist test run is what would notice.
 
 ## Typing
 
@@ -484,6 +522,8 @@ a level low where the true value is an integer. v0.4.13 added
 for experiments, v0.4.14 shipped a DCT-II and a Haar transform selectable
 by name, and v0.4.15 added pickled arrays and pixel lists as input, read
 through an allowlist so nothing in the file is executed, plus a generated
-table of contents in the README.
+table of contents in the README. v0.4.16 grouped the format modules and the
+tests into folders; the flat module paths such as `walsh.image.bmp` went with
+it, and `walsh.image` is the import path.
 Partially based on
 https://github.com/ktisha/python2012/tree/dee4beda8e22f3a66a3e31384d4b72ab66102e88/avereshchagin

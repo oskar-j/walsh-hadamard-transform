@@ -9,6 +9,53 @@ The `## [x.y.z]` headings are load-bearing: the release workflow extracts the
 section matching the version in `pyproject.toml` and uses it as the GitHub
 Release notes.
 
+## [0.4.16]
+
+### Changed
+
+- `src/walsh/image` is no longer flat. The format modules are grouped by
+  family: `raster/` (BMP, TIFF), `netpbm/` (PPM, PAM and the sample code they
+  share) and `arrays/` (`.npy`, pickles and the array rules they share).
+  `base.py`, `_io.py` and `cim.py` stay at the top, since everything depends
+  on them. Nothing public moved: every class, constant and function is still
+  exported from `walsh.image` and `walsh`, and codec output is unchanged.
+- **The flat module paths are gone.** `walsh.image.bmp`, `.tiff`, `.ppm`,
+  `.pam`, `.npy` and `.pkl` no longer exist; the modules are
+  `walsh.image.raster.bmp`, `walsh.image.raster.tiff`,
+  `walsh.image.netpbm.ppm`, `walsh.image.netpbm.pam`,
+  `walsh.image.arrays.npy` and `walsh.image.arrays.pkl`. Code that imported a
+  class from one of the old paths should import it from `walsh.image` or
+  `walsh` instead, which is what the documentation has always shown and which
+  did not change: `from walsh.image import BMPImage`. No aliases were left
+  behind, on purpose, so the source does not have to describe where things
+  used to be.
+- `tests/` mirrors the source: `image/` with `raster/`, `netpbm/` and
+  `arrays/` inside it, `codec/`, `cli/`, `support/` and `project/`. The
+  520-line `test_image.py`, which mixed three subjects, is split along the
+  same lines into `image/raster/test_bmp.py`, `image/test_cim.py` and
+  `image/test_base.py`, with its one `align` test joining `image/test_io.py`.
+  The split was done on the syntax tree, so each test kept its decorators and
+  comments, and the count is unchanged: 608 before, 608 after.
+
+### Added
+
+- `tests/image/test_layout.py`: every import path, each checked as the first
+  import of a fresh interpreter, where an import cycle between the family
+  packages would show; and that the family packages and `walsh.image` export
+  the same objects.
+- `pythonpath = ["tests"]` in the pytest configuration, so `from conftest
+  import ...` works at any depth, and a `ROOT` in `conftest.py` for tests that
+  need a repository path. Four tests counted `parent` hops and broke the
+  moment the folders appeared.
+
+### Notes
+
+- `MANIFEST.in` gains the `exclude data/*.pkl` line 0.4.15 should have added
+  beside the other sample suffixes. It changes nothing in practice: the sdist
+  ships no sample data at all, which was checked against the built archive.
+- 608 to 616 tests, coverage unchanged at 99.12%. Run locally on 3.10 through
+  3.14.
+
 ## [0.4.15]
 
 ### Added

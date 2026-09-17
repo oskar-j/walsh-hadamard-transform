@@ -4,7 +4,7 @@
 metadata, so the profile is declared here once rather than detected: ``uint8``
 only; ``(height, width, 3)`` is RGB, ``(height, width)`` and ``(height, width,
 1)`` are greyscale replicated to three channels, and ``(height, width, 4)`` is
-RGBA accepted only when alpha is 255 throughout. See :mod:`walsh.image.npy`
+RGBA accepted only when alpha is 255 throughout. See :mod:`walsh.image.arrays.npy`
 for why each of the others is refused.
 """
 

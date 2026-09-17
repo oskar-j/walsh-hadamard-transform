@@ -9,7 +9,11 @@ import pytest
 
 from walsh.image import BMP_HEADER_FORMAT, BMP_PIXEL_OFFSET, BMP_SIGNATURE, align
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+#: The repository root. Test modules live at different depths below ``tests/``,
+#: so they take the root from here rather than counting ``parent`` hops.
+ROOT = Path(__file__).resolve().parent.parent
+
+DATA_DIR = ROOT / "data"
 
 Pixel = tuple[int, int, int]
 

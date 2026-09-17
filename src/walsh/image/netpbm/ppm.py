@@ -15,7 +15,7 @@ skips. Files whose ``maxval`` is below 255 are rescaled to the full 0-255 range
 on load; ``maxval`` above 255 means 16-bit samples, which are not supported.
 
 The raster after the header is the same as PAM's, so decoding and encoding it
-are shared with :mod:`walsh.image.pam` through :mod:`walsh.image._netpbm`.
+are shared with :mod:`walsh.image.netpbm.pam` through :mod:`walsh.image.netpbm._samples`.
 """
 
 from __future__ import annotations
@@ -27,8 +27,13 @@ import numpy as np
 
 from walsh.exceptions import UnsupportedFileFormatError
 from walsh.image._io import FileSource, open_binary_read, open_binary_write
-from walsh.image._netpbm import NETPBM_MAX_SAMPLE, encode_samples, read_samples, rescale_sample
 from walsh.image.base import RasterImage
+from walsh.image.netpbm._samples import (
+    NETPBM_MAX_SAMPLE,
+    encode_samples,
+    read_samples,
+    rescale_sample,
+)
 
 __all__ = ["PPM_ASCII_MAGIC", "PPM_BINARY_MAGIC", "PPM_MAX_SAMPLE", "PPMImage"]
 
