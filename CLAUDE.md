@@ -456,9 +456,10 @@ run `python tests/project/test_readme_toc.py` to regenerate the block between th
 
 ## Coverage gate
 
-`[tool.coverage.report] fail_under = 90` with branch coverage on. Currently 97%,
-so there is headroom, but `--cov` is what applies the floor — a bare `pytest`
-does not. CI passes `--cov` on all five Python versions and those `test` jobs
+`[tool.coverage.report] fail_under = 90` with branch coverage on. At 100%
+since 0.4.18 (#26), with no `pragma: no cover` on any reachable line, so a
+drop shows exactly which lines lost their test. `--cov` is what applies the
+floor — a bare `pytest` does not. CI passes `--cov` on all five Python versions and those `test` jobs
 are required checks on `master`, so a coverage drop blocks the merge rather than
 just going red. `release.yml` applies the same floor before it builds.
 
@@ -529,6 +530,7 @@ through an allowlist so nothing in the file is executed, plus a generated
 table of contents in the README. v0.4.16 grouped the format modules and the
 tests into folders; the flat module paths such as `walsh.image.bmp` went with
 it, and `walsh.image` is the import path. v0.4.17 added the README's
-explanatory figure, tagline sentences and a typed badge.
+explanatory figure, tagline sentences and a typed badge. v0.4.18 closed #26 with the
+regression tests it asked for and took coverage to 100%.
 Partially based on
 https://github.com/ktisha/python2012/tree/dee4beda8e22f3a66a3e31384d4b72ab66102e88/avereshchagin

@@ -120,13 +120,28 @@ def test_block_size_options_change_the_layout(
     assert custom.stat().st_size != default.stat().st_size
 
 
-def test_coeff_removal_is_accepted(runner: CliRunner, gradient_bmp: Path, tmp_path: Path) -> None:
-    output = tmp_path / "coeff.cim"
-    result = runner.invoke(
-        main, ["compress", "--coeff-removal", "0.5", str(gradient_bmp), str(output)]
-    )
-    assert result.exit_code == 0, result.output
-    assert output.exists()
+def test_coeff_removal_changes_the_output_only_when_it_bites(
+    runner: CliRunner, gradient_bmp: Path, tmp_path: Path
+) -> None:
+    """A byte comparison at 0.5, the value this test once used, would assert
+    nothing: no coefficient of the gradient is that small. 500 zeroes most of
+    them, so the bytes must differ from the default run's, in the same file
+    size. Exit code and existence alone left the option free to be ignored."""
+    default = tmp_path / "default.cim"
+    assert runner.invoke(main, ["compress", str(gradient_bmp), str(default)]).exit_code == 0
+
+    outputs = {}
+    for coeff in ("0.5", "500"):
+        output = tmp_path / f"{coeff}.cim"
+        result = runner.invoke(
+            main, ["compress", "--coeff-removal", coeff, str(gradient_bmp), str(output)]
+        )
+        assert result.exit_code == 0, result.output
+        outputs[coeff] = output.read_bytes()
+
+    assert outputs["0.5"] == default.read_bytes()
+    assert outputs["500"] != default.read_bytes()
+    assert len(outputs["500"]) == len(default.read_bytes())
 
 
 @pytest.mark.parametrize("flag", ["-v", "-vv"])

@@ -341,3 +341,13 @@ def test_set_data_rejects_a_block_smaller_than_its_packed_size() -> None:
         ValueError, match=r"y block of shape \(8, 8\) is smaller than the packed size 16"
     ):
         image.set_data(block, block, block)
+
+
+def test_saving_without_block_descriptions_is_an_error(tmp_path: Path) -> None:
+    """The header cannot be written without them; a file must not be started."""
+    image = CustomizableImage()
+    image.set_dimensions(8, 8)
+    output = tmp_path / "headless.cim"
+    with pytest.raises(ValueError, match="no block description set for channel 'y'"):
+        image.save(str(output))
+    assert not output.exists()

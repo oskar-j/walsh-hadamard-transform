@@ -142,3 +142,22 @@ def test_bmp_and_ppm_agree_on_the_same_picture(tmp_path: Path) -> None:
 
     assert from_bmp.get_raw_data() == from_ppm.get_raw_data() == pixels
     assert from_bmp.get_dimensions() == from_ppm.get_dimensions()
+
+
+def test_ascii_samples_may_be_separated_by_any_run_of_whitespace(tmp_path: Path) -> None:
+    """Netpbm allows any amount of whitespace between numbers, and the token
+    reader consumes exactly one character after each, so runs of two or more,
+    blank lines included, are the loop's own business."""
+    path = tmp_path / "spaced.ppm"
+    path.write_bytes(b"P3\n2 2\n255\n\n  1 2 3\t\t4 5 6\n\n\n7 8 9   10 11 12\n\n")
+    image = PPMImage()
+    image.load(str(path))
+    assert image.get_raw_data() == [(1, 2, 3), (4, 5, 6), (7, 8, 9), (10, 11, 12)]
+
+
+def test_an_ascii_ppm_that_ends_before_its_samples_do_is_refused(tmp_path: Path) -> None:
+    """P3 promises width * height * 3 numbers; six of twelve, then end of file."""
+    path = tmp_path / "short.ppm"
+    path.write_bytes(b"P3\n2 2\n255\n1 2 3 4 5 6\n")
+    with pytest.raises(UnsupportedFileFormatError, match="truncated PPM data"):
+        PPMImage().load(str(path))

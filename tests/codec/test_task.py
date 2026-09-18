@@ -637,3 +637,42 @@ def test_the_largest_legal_edge_keeps_white_white(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="at most 128"):
         Task(y_block_size=256, cb_block_size=256, cr_block_size=256)
+
+
+# --- coefficient removal is plumbed through, and bites (#26) --------------------
+
+
+def _stored_coefficients(path: Path) -> np.ndarray:
+    return np.frombuffer(path.read_bytes()[26:], dtype="<i2")
+
+
+def test_coeff_removal_leaves_fewer_coefficients_the_higher_it_is(
+    gradient_bmp: Path, tmp_path: Path
+) -> None:
+    """The one assertion that catches the threshold being dropped on the way
+    from the builder to the transform. The gradient's 96 stored coefficients
+    include 30 non-zero ones; a threshold below all of them changes nothing,
+    which is why a byte comparison at 0.5 would assert nothing, and then the
+    ladder is 30, 14, 5."""
+    outputs: dict[float | None, Path] = {}
+    for coeff in (None, 0.5, 100.0, 500.0):
+        output = tmp_path / f"{coeff}.cim"
+        Task().with_coeff_removal(coeff).with_action("compress").with_input(
+            str(gradient_bmp)
+        ).with_output(str(output)).run()
+        outputs[coeff] = output
+
+    assert outputs[0.5].read_bytes() == outputs[None].read_bytes()
+    assert outputs[100.0].read_bytes() != outputs[None].read_bytes()
+    assert outputs[500.0].read_bytes() != outputs[100.0].read_bytes()
+    assert {coeff: len(path.read_bytes()) for coeff, path in outputs.items()} == dict.fromkeys(
+        outputs, 218
+    ), "the threshold zeroes coefficients; it never changes the layout"
+
+    non_zero = {
+        coeff: int((_stored_coefficients(path) != 0).sum()) for coeff, path in outputs.items()
+    }
+    assert non_zero == {None: 30, 0.5: 30, 100.0: 14, 500.0: 5}
+    survivors = _stored_coefficients(outputs[500.0])
+    survivors = survivors[survivors != 0]
+    assert np.all(np.abs(survivors) >= 500), "every survivor is at or above the threshold"
