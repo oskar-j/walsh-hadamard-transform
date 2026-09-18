@@ -99,11 +99,11 @@ jobs:
           uv venv /tmp/smoke
           uv pip install --python /tmp/smoke/bin/python dist/*.whl
           /tmp/smoke/bin/walsh --version
-          /tmp/smoke/bin/walsh compress data/image.bmp /tmp/smoke.cim
+          /tmp/smoke/bin/walsh compress data/bmp/image.bmp /tmp/smoke.cim
           /tmp/smoke/bin/walsh extract /tmp/smoke.cim /tmp/smoke.bmp
           # The codec is lossy, so a byte-identical result would mean the
           # transform never ran. Anything else is the expected outcome.
-          if cmp -s data/image.bmp /tmp/smoke.bmp; then
+          if cmp -s data/bmp/image.bmp /tmp/smoke.bmp; then
             echo "unexpected: round trip returned the input unchanged" >&2
             exit 1
           fi
@@ -112,12 +112,20 @@ jobs:
           # 0.4.12 the transform's arithmetic is exact, so the bytes must match
           # on this runner's openblas as they do under macOS Accelerate, where
           # the reference was written. This is the cross-platform proof.
-          for source in earth.ppm earth.pam earth.tiff earth.npy earth.pkl; do
-            /tmp/smoke/bin/walsh compress "data/$source" /tmp/smoke-earth.cim
-            cmp data/transformed_earth.cim /tmp/smoke-earth.cim
+          # The samples sit in a folder per file type: data/ppm/earth.ppm.
+          # earth.png is compressed and filtered by libpng (Netpbm wrote it)
+          # and must still reach the transform as the same pixels.
+          for kind in ppm pam tiff npy pkl png; do
+            /tmp/smoke/bin/walsh compress "data/$kind/earth.$kind" /tmp/smoke-earth.cim
+            cmp data/cim/transformed_earth.cim /tmp/smoke-earth.cim
           done
-          /tmp/smoke/bin/walsh extract data/transformed_earth.cim /tmp/smoke-earth.ppm
-          cmp data/recreated.ppm /tmp/smoke-earth.ppm
+          /tmp/smoke/bin/walsh extract data/cim/transformed_earth.cim /tmp/smoke-earth.ppm
+          cmp data/ppm/recreated.ppm /tmp/smoke-earth.ppm
+          # A PNG is a zlib stream, whose bytes may differ between zlib builds,
+          # so the PNG written here is compared by the pixels it decodes to.
+          /tmp/smoke/bin/walsh extract data/cim/transformed_earth.cim /tmp/smoke-earth.png
+          /tmp/smoke/bin/python -c "from walsh.image import PNGImage, PPMImage; png = PNGImage(); png.load('/tmp/smoke-earth.png'); ppm = PPMImage(); ppm.set_array(png.get_array()); ppm.save('/tmp/smoke-earth-from-png.ppm')"
+          cmp data/ppm/recreated.ppm /tmp/smoke-earth-from-png.ppm
           echo "wheel smoke test passed"
 
       # The wheel is built from [tool.setuptools.packages.find] and cannot

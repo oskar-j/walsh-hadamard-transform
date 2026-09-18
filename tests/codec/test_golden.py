@@ -6,7 +6,7 @@ by how much. Since 0.4.12 (#39) the transform's arithmetic is exact, so both
 directions are byte-exact on every platform and BLAS library, and these tests
 are plain equality again: 0.4.11 had to allow a one-step rounding difference
 between Apple's Accelerate and scipy-openblas, and the wheel smoke in CI runs
-the same comparison with `cmp`. `data/transformed_earth.cim` was written by
+the same comparison with `cmp`. `data/cim/transformed_earth.cim` was written by
 0.4.12 on macOS; CI proves the Linux runner produces the same bytes.
 """
 
@@ -14,15 +14,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from conftest import Sample
+from walsh.image import PNGImage, PPMImage
 from walsh.task import Task
 
+#: One picture in every container the codec reads. The PNG was written by
+#: Netpbm's `pnmtopng`, so it is compressed and filtered by libpng, and it must
+#: still reach the transform as exactly the pixels of the others.
+SOURCES = ("earth.ppm", "earth.tiff", "earth.pam", "earth.npy", "earth.pkl", "earth.png")
 
-@pytest.mark.parametrize(
-    "source", ["earth.ppm", "earth.tiff", "earth.pam", "earth.npy", "earth.pkl"]
-)
+
+@pytest.mark.parametrize("source", [*SOURCES])
 def test_every_source_container_compresses_to_the_checked_in_cim(
     source: str, sample: Sample, tmp_path: Path
 ) -> None:
@@ -37,7 +42,7 @@ def test_every_source_container_agrees_with_every_other_exactly(
     """Redundant with the test above while that one holds, and the separate
     signal when it does not: the source format cannot reach the arithmetic."""
     digests = set()
-    for source in ("earth.ppm", "earth.tiff", "earth.pam", "earth.npy", "earth.pkl"):
+    for source in SOURCES:
         output = tmp_path / f"{source}.cim"
         Task().with_action("compress").with_input(str(sample(source))).with_output(
             str(output)
@@ -70,3 +75,25 @@ def test_the_bmp_sample_round_trips_to_its_checked_in_reconstruction(
     ).run()
     Task().with_action("extract").with_input(str(compressed)).with_output(str(restored)).run()
     assert restored.read_bytes() == sample("recreated.bmp").read_bytes()
+
+
+def test_the_checked_in_png_is_pinned_by_its_pixels_not_its_bytes(
+    sample: Sample, tmp_path: Path
+) -> None:
+    """A PNG is a zlib stream, and DEFLATE output may differ from one zlib
+    build to the next (zlib-ng, which some distributions ship as zlib, already
+    does). So `recreated.png` is the one checked-in output compared by what it
+    decodes to: exactly the pixels of `recreated.ppm`, from the file in the
+    repository and from a PNG written just now."""
+    expected = PPMImage()
+    expected.load(str(sample("recreated.ppm")))
+
+    fresh = tmp_path / "recreated.png"
+    Task().with_action("extract").with_input(str(sample("transformed_earth.cim"))).with_output(
+        str(fresh)
+    ).run()
+
+    for path in (sample("recreated.png"), fresh):
+        decoded = PNGImage()
+        decoded.load(str(path))
+        assert np.array_equal(decoded.get_array(), expected.get_array()), path

@@ -291,7 +291,7 @@ def test_npy_and_ppm_agree_on_the_same_picture(tmp_path: Path) -> None:
 
 
 def test_the_checked_in_sample_was_written_by_numpy_not_by_this_package(sample_npy: Path) -> None:
-    """data/earth.npy came from np.save of Pillow's array, so loading it is a
+    """data/npy/earth.npy came from np.save of Pillow's array, so loading it is a
     foreign-writer check; and this package's writer must reproduce it exactly."""
     magic, major, minor = struct.unpack("<6sBB", sample_npy.read_bytes()[:8])
     assert (magic, major, minor) == (b"\x93NUMPY", 1, 0)

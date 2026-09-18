@@ -13,15 +13,25 @@ import pytest
 
 import walsh.image
 
-FORMAT_CLASSES = ("BMPImage", "TIFFImage", "PPMImage", "PAMImage", "NPYImage", "PickleImage")
+FORMAT_CLASSES = (
+    "BMPImage",
+    "PNGImage",
+    "TIFFImage",
+    "PPMImage",
+    "PAMImage",
+    "NPYImage",
+    "PickleImage",
+)
 
 
 @pytest.mark.parametrize(
     "statement",
     [
-        "from walsh import BMPImage, PickleImage",
+        "from walsh import BMPImage, PickleImage, PNGImage",
         "from walsh.image import BMPImage, TIFFImage, PPMImage, PAMImage, NPYImage, PickleImage",
-        "from walsh.image.raster import BMPImage, TIFFImage",
+        "from walsh.image import PNG_SIGNATURE, PNGImage",
+        "from walsh.image.raster import BMPImage, PNGImage, TIFFImage",
+        "import walsh.image.raster.png",
         "from walsh.image.netpbm import PAMImage, PPMImage",
         "from walsh.image.arrays import NPYImage, PickleImage",
         "import walsh.image.arrays.pkl as pkl; pkl.safe_loads",

@@ -10,12 +10,7 @@ recursive-include tests *.py
 recursive-include examples *.py
 
 # The sample images are ~480 KB each and only feed tests that skip when the
-# files are absent. Keep them out of the distribution.
-exclude data/*.bmp
-exclude data/*.ppm
-exclude data/*.pam
-exclude data/*.npy
-exclude data/*.pkl
-exclude data/*.tif
-exclude data/*.tiff
-exclude data/*.cim
+# files are absent. Keep them out of the distribution. The whole folder, not a
+# line per suffix: a list of suffixes was forgotten once already, when `.pkl`
+# arrived in 0.4.15, and the samples now sit a folder deeper than it matched.
+prune data

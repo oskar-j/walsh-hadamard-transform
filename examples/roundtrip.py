@@ -17,9 +17,9 @@ from PIL import Image
 from walsh import Task
 
 DATA = Path(__file__).resolve().parent.parent / "data"
-SOURCE = DATA / "image.bmp"
-COMPRESSED = DATA / "transformed.cim"  # raw post-transform data, not a standard format
-RESTORED = DATA / "recreated.bmp"
+SOURCE = DATA / "bmp" / "image.bmp"
+COMPRESSED = DATA / "cim" / "transformed.cim"  # raw post-transform data, not a standard format
+RESTORED = DATA / "bmp" / "recreated.bmp"
 
 
 def main() -> None:

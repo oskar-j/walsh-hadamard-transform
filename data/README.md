@@ -5,20 +5,32 @@ excluded from the sdist and wheel (see `MANIFEST.in`), because at roughly half a
 megabyte each they would dominate the distribution, and the tests that use them
 skip when they are absent.
 
-Every `recreated.*` file and `transformed_earth.cim` is current output,
+The files sit in a folder per file type, named after the suffix (0.5.0):
+`ppm/earth.ppm`, `png/recreated.png`, `cim/transformed_earth.cim`. A new
+format brings its own folder, and nothing else has to be told about it: the
+tests find a sample from its name alone, and `MANIFEST.in` prunes the whole
+of `data/` rather than listing suffixes.
+
+Every `recreated.*` file and `cim/transformed_earth.cim` is current output,
 regenerated whenever the codec changes (last: 0.4.12, which made the
 transform's arithmetic exact, so these bytes are what the codec produces on
 every platform). Reproduce any of them with:
 
 ```
-walsh compress data/<source> /tmp/out.cim
-walsh extract  /tmp/out.cim data/<recreated>
+walsh compress data/<type>/<source> /tmp/out.cim
+walsh extract  /tmp/out.cim data/<type>/<recreated>
 ```
+
+`png/recreated.png` is the one exception to "these bytes": a PNG is a zlib
+stream, and DEFLATE output may differ from one zlib build to the next, so that
+file is pinned by the pixels it decodes to, which are exactly those of
+`ppm/recreated.ppm`.
 
 ## The Blue Marble sample
 
-`earth.ppm`, `earth.tiff`, `earth.pam`, `earth.npy` and `earth.pkl` are the
-same 400x400 picture in five containers, so they also serve as a check that the source
+`earth.ppm`, `earth.tiff`, `earth.pam`, `earth.npy`, `earth.pkl` and
+`earth.png` are the
+same 400x400 picture in six containers, so they also serve as a check that the source
 format does not affect the result: compressing any of them produces a
 byte-identical `.cim`.
 
@@ -40,6 +52,11 @@ byte-identical `.cim`.
   `earth.pkl` is `pickle.dump` of that same array at protocol 4, written under
   NumPy 2, and `numpy.load(allow_pickle=True)` reads it; this package reads it
   through an allowlist instead, executing nothing, under NumPy 1 or 2.
+  `earth.png` is `pnmtopng earth.ppm` from Netpbm 11.2, which is libpng's
+  encoder: 37 `IDAT` chunks, with Sub, Average and Paeth rows chosen
+  adaptively. It is deliberately not this package's own output, so that
+  reading it is a check against a foreign writer, and the one sample that is
+  both compressed and filtered on the way in.
 
 Reproduce the PPM with:
 
@@ -70,8 +87,13 @@ im.crop((left, top, left + side, top + side)).resize((400, 400), Image.LANCZOS).
 | `recreated.npy` | `earth.npy` round-tripped | 25.07 dB |
 | `earth.pkl` | Blue Marble, the same array pickled at protocol 4 | — |
 | `recreated.pkl` | `earth.pkl` round-tripped, as rows of `(r, g, b)` tuples | 25.07 dB |
+| `earth.png` | Blue Marble, 8-bit RGB PNG written by libpng | — |
+| `recreated.png` | `earth.png` round-tripped; pinned by its pixels, not its bytes | 25.07 dB |
 
-The five Blue Marble reconstructions are pixel-identical, as they must be:
+Each is in the folder named after its suffix, and `transformed_earth.cim`,
+what every `earth.*` compresses to, is in `cim/`.
+
+The six Blue Marble reconstructions are pixel-identical, as they must be:
 the codec sees the same picture whichever container it arrives in.
 
 See the [main README](../README.md#reading-the-psnr-figures) for what the dB

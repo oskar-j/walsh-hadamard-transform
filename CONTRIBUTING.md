@@ -69,7 +69,7 @@ uv run mypy
 
 Tests import the installed package, so an editable install has to exist before
 pytest will work — `uv sync` handles that. `tests/conftest.py` provides
-`write_bmp`, `write_ppm`, `write_pam`, `write_tiff` and `write_npy` helpers plus a
+`write_bmp`, `write_png`, `write_ppm`, `write_pam`, `write_tiff` and `write_npy` helpers plus a
 `gradient_*` fixture (a synthetic 16x16 picture) and a `sample_*` fixture (the
 checked-in 400x400 sample) for each format.
 
@@ -118,7 +118,9 @@ name no other test module has. Convert to and from the in-memory
 contract inside that class: decode with `np.frombuffer` and hand `set_array` a
 `(height, width, 3)` `uint8` array, and serialise from `get_array()`. Never
 build a list of tuples on the way — routing one through `np.asarray` is slower
-than per-pixel Python. Nothing in `Task` or the CLI needs to change.
+than per-pixel Python. Nothing in `Task` or the CLI needs to change. A sample
+file goes in `data/<suffix>/`, which is where the `sample` fixture looks for it
+from the file name alone.
 
 ## Releasing
 
@@ -133,17 +135,13 @@ version are a no-op.
 ## What is wanted at the moment
 
 * Check the "Issues" section for something to pick up
-* Support for more uncompressed formats — TGA is the obvious next one, and
-  PNG would need no new dependency since `zlib` is in the standard library
-  (#17). Headerless RAW is largely covered by `.npy` since 0.4.8, which carries
+* Support for more formats — TGA is the obvious next uncompressed one.
+  Headerless RAW is largely covered by `.npy` since 0.4.8, which carries
   the shape and dtype a raw file lacks. The `image` package is laid out to
   make them self-contained additions; PAM in 0.4.1 and NPY in 0.4.8 are the
-  templates. Widening the TIFF
-  profile (PackBits, planar, 16-bit) is another self-contained piece
-* A numpy-backed `RasterImage`. Since 0.4.0 the codec core is vectorised and
-  what remains of the run time is the format readers and writers building and
-  consuming the list of pixel tuples, plus the conversion across that boundary.
-  `get_raw_data` is public, so this needs a compatibility story
+  templates. Widening a profile is another self-contained piece: PackBits,
+  planar or 16-bit TIFF, and for PNG (0.5.0) palette and greyscale files,
+  whose expansion to RGB is lossless, and Adam7 interlacing
 * Entropy or run-length coding in the `.cim` container. `--coeff-removal`
   currently makes the spectrum much sparser without shrinking the file, since
   the format writes a fixed count of `int16` regardless of zeros; gzip recovers

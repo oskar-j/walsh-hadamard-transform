@@ -9,6 +9,88 @@ The `## [x.y.z]` headings are load-bearing: the release workflow extracts the
 section matching the version in `pyproject.toml` and uses it as the GitHub
 Release notes.
 
+## [0.5.0]
+
+### Added
+
+- **PNG, read and written** (#17): `.png` joins the formats, as `PNGImage`.
+  It is the first compressed format here and needs no new dependency, because
+  a PNG's pixel rows sit in a zlib stream and the inflater is `zlib` in the
+  standard library. Everything around it is read by hand, as for every other
+  format: chunks, their CRCs, and the five row filters. The compression is
+  lossless, so `data/png/earth.png`, written by libpng, compresses to a `.cim`
+  byte-identical to the one from `earth.ppm`.
+- **One profile, the rest refused by name**, in the way of `tiff.py` and
+  `pam.py`. Read: 8 bits per sample, colour type 2 (RGB) or 6 (RGBA), not
+  interlaced, any number of `IDAT` chunks. Ancillary chunks (`gAMA`, `sRGB`,
+  `iCCP`, text, `acTL`) and the suggested `PLTE` of a truecolour file are
+  skipped once their CRC checks out. Refused: palette, greyscale, 16-bit and
+  Adam7 files, an unknown *critical* chunk as the format requires, and a
+  header the format itself forbids, which is reported as invalid rather than
+  as unsupported.
+- **Transparency is refused, not flattened.** Dropping alpha means choosing a
+  background, and nothing in the file says which. RGBA is read only when every
+  pixel is opaque, and the message counts the ones that are not. The same
+  goes for an RGB file whose `tRNS` chunk keys out a colour some pixel has:
+  `tRNS` is ancillary, so a reader that skipped every ancillary chunk would
+  flatten such a picture without a word.
+- **No Python loop over pixels, which #17 expected to need.** Sub, Average and
+  Paeth predict a byte from the pixel to its left, which was itself predicted,
+  so the textbook decoder walks every byte. But a pixel needs only its left,
+  upper and upper-left neighbours, all of which lie on the two anti-diagonals
+  before its own, so the image is undone a *diagonal* at a time, each as one
+  array operation: `width + height` steps in place of `width * height`. A
+  2000x2000 PNG from libpng loads in 0.48 s at a 70 MiB peak, where a byte
+  loop in Python takes 5 to 12 s depending on how tightly it is written. Bands without Average or Paeth skip the
+  wavefront: Sub is a running sum and Up adds the row above.
+- **A small file cannot cost much memory.** Inflation is clamped to the size
+  the header declares, as the TIFF reader clamps its strips, so 60 KB of
+  compressed zeros after an 8x8 image are never inflated (they would be 64
+  MB); and nothing is allocated from the header, only from what the stream
+  delivers, so a header declaring 2**31 - 1 pixels each way is reported as
+  truncated for a few kilobytes. A chunk's payload is read through
+  `read_up_to`, so a declared two-gigabyte chunk costs what the file holds.
+- **Written files use a filter per row**, where #17 proposed filter 0
+  throughout. That predates the array contract of 0.4.10: choosing a filter
+  is now one array pass per band of rows, by the minimum sum of absolute
+  differences that the specification suggests, and on `earth.ppm` it makes
+  exactly libpng's choices (45 Sub, 354 Average, 1 Paeth). Files are 14%
+  smaller on the samples and 53% smaller on a smooth 2000x2000 picture, and
+  this package's own output now exercises its reader's hardest path. 8-bit
+  RGB, `IHDR`, `IDAT`, `IEND`; the stream is split only if it outgrows a
+  chunk's 31-bit length. An empty image is a `ValueError`: a PNG cannot be.
+- Samples `data/png/earth.png`, from Netpbm's `pnmtopng` (libpng: 37 `IDAT`
+  chunks, adaptive filters), and `data/png/recreated.png`. **The second is
+  pinned by its pixels, not its bytes**: DEFLATE output may differ between
+  zlib builds, and zlib-ng, which some distributions ship as zlib, already
+  does. `earth.png` is in the golden test and the CI `cmp` loop like every
+  other source; the PNG the wheel writes in CI is decoded and compared with
+  `recreated.ppm`.
+- Verified against two other implementations, in both directions: PNGs from
+  Pillow (plain, optimised, opaque RGBA) and from Netpbm load to identical
+  pixels, and Pillow and `pngtopam` read this package's files to identical
+  pixels. The tests themselves build their PNGs with an encoder in
+  `tests/conftest.py` that filters one byte at a time from the specification
+  and shares no code with the reader or the writer. It found one bug before
+  release: an inflate budget computed from a hostile header overflowed zlib's
+  C length.
+
+### Changed
+
+- **The samples in `data/` are grouped into a folder per file type**:
+  `data/ppm/earth.ppm`, `data/bmp/image.bmp`, `data/cim/transformed_earth.cim`
+  and so on. The `sample` fixture finds the folder from the suffix, so no test
+  names one; the README, the examples, the CI smoke test and `.gitignore`
+  follow.
+- `MANIFEST.in` prunes `data/` whole where it listed a suffix per line. The
+  list had been forgotten once already, for `.pkl` in 0.4.15, and would not
+  have matched files a folder deeper.
+- `CONTRIBUTING.md` no longer lists a numpy-backed `RasterImage` as wanted: it
+  arrived in 0.4.10.
+
+Codec output is unchanged: `transformed_earth.cim` and every other
+`recreated.*` file are the bytes of 0.4.12.
+
 ## [0.4.19]
 
 ### Changed

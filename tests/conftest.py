@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import struct
-from collections.abc import Callable
+import zlib
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -301,6 +302,135 @@ def write_npy(
     return path
 
 
+def png_predict(kind: int, left: int, above: int, corner: int) -> int:
+    """What PNG filter ``kind`` predicts for one byte, straight from the spec.
+
+    Kept byte-at-a-time and free of NumPy on purpose: the reader under test
+    undoes filters a whole anti-diagonal at a time, and the writer filters a
+    whole image at once, so this is the independent statement of the rule that
+    both are checked against.
+    """
+    if kind > 4:
+        return 0  # not a filter: a test asked for a type the reader must refuse
+    if kind == 4:
+        estimate = left + above - corner
+        distances = (abs(estimate - left), abs(estimate - above), abs(estimate - corner))
+        # Ties go to left, then above: min() keeps the first of equal keys.
+        return min(zip(distances, (0, 1, 2), (left, above, corner), strict=True))[2]
+    return (0, left, above, (left + above) >> 1)[kind]
+
+
+def png_filter_rows(rows: Sequence[bytes], kinds: Sequence[int], samples: int) -> bytes:
+    """Filter pixel rows one byte at a time, each row led by its filter type."""
+    out = bytearray()
+    prior = bytes(len(rows[0]))
+    for row, kind in zip(rows, kinds, strict=True):
+        out.append(kind)
+        for index, value in enumerate(row):
+            left = row[index - samples] if index >= samples else 0
+            corner = prior[index - samples] if index >= samples else 0
+            out.append((value - png_predict(kind, left, prior[index], corner)) & 0xFF)
+        prior = row
+    return bytes(out)
+
+
+def png_unfilter_rows(filtered: bytes, height: int, samples: int) -> list[bytes]:
+    """Undo :func:`png_filter_rows`, again one byte at a time."""
+    stride = len(filtered) // height
+    rows: list[bytes] = []
+    prior = bytes(stride - 1)
+    for start in range(0, len(filtered), stride):
+        kind, body = filtered[start], filtered[start + 1 : start + stride]
+        row = bytearray()
+        for index, value in enumerate(body):
+            left = row[index - samples] if index >= samples else 0
+            corner = prior[index - samples] if index >= samples else 0
+            row.append((value + png_predict(kind, left, prior[index], corner)) & 0xFF)
+        prior = bytes(row)
+        rows.append(prior)
+    return rows
+
+
+def png_chunk(kind: bytes, data: bytes = b"", *, crc: int | None = None) -> bytes:
+    """Frame one PNG chunk. ``crc`` overrides the checksum, to write a bad one."""
+    checksum = zlib.crc32(kind + data) if crc is None else crc
+    return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", checksum)
+
+
+def build_png(
+    width: int,
+    height: int,
+    pixels: list[Pixel],
+    *,
+    filters: int | Sequence[int] = 0,
+    alpha: int | Sequence[int] | None = None,
+    colour_type: int | None = None,
+    bit_depth: int = 8,
+    compression: int = 0,
+    filter_method: int = 0,
+    interlace: int = 0,
+    before_idat: Sequence[bytes] = (),
+    after_idat: Sequence[bytes] = (),
+    idat_size: int | None = None,
+    between_idat: bytes = b"",
+    surplus: bytes = b"",
+    end: bool = True,
+) -> bytes:
+    """Build a PNG, with hooks for the files this reader must refuse.
+
+    ``filters`` is one filter type for every row or a sequence cycled over the
+    rows. ``alpha`` makes the file RGBA, with one value throughout or one per
+    pixel. The header fields can be overridden on their own, which makes a
+    header that lies about a body built as eight-bit truecolour: enough for a
+    reader that refuses at the header. ``before_idat`` and ``after_idat`` take
+    ready-made chunks, ``idat_size`` splits the stream over several ``IDAT``
+    chunks with ``between_idat`` after the first, ``surplus`` is appended to
+    the filtered rows before compression, and ``end=False`` omits ``IEND``.
+    """
+    samples = 3 if alpha is None else 4
+    if alpha is None:
+        body = [bytes(channel for channel in pixel) for pixel in pixels]
+    else:
+        alphas = [alpha] * len(pixels) if isinstance(alpha, int) else list(alpha)
+        body = [bytes((*pixel, a)) for pixel, a in zip(pixels, alphas, strict=True)]
+    rows = [b"".join(body[y * width : (y + 1) * width]) for y in range(height)]
+    cycle = [filters] if isinstance(filters, int) else list(filters)
+    kinds = [cycle[y % len(cycle)] for y in range(height)]
+
+    packed = zlib.compress(png_filter_rows(rows, kinds, samples) + surplus)
+    size = idat_size or max(len(packed), 1)
+    pieces = [packed[start : start + size] for start in range(0, len(packed), size)]
+
+    header = struct.pack(
+        ">IIBBBBB",
+        width,
+        height,
+        bit_depth,
+        (2 if alpha is None else 6) if colour_type is None else colour_type,
+        compression,
+        filter_method,
+        interlace,
+    )
+    out = bytearray(b"\x89PNG\r\n\x1a\n" + png_chunk(b"IHDR", header))
+    for chunk in before_idat:
+        out += chunk
+    for index, piece in enumerate(pieces):
+        out += png_chunk(b"IDAT", piece)
+        if index == 0:
+            out += between_idat
+    for chunk in after_idat:
+        out += chunk
+    if end:
+        out += png_chunk(b"IEND")
+    return bytes(out)
+
+
+def write_png(path: Path, width: int, height: int, pixels: list[Pixel], **kwargs: Any) -> Path:
+    """Write a PNG built by :func:`build_png`. See it for the keyword arguments."""
+    path.write_bytes(build_png(width, height, pixels, **kwargs))
+    return path
+
+
 def gradient_pixels(width: int, height: int) -> list[Pixel]:
     """A smooth gradient, which the low-frequency codec reproduces well."""
     return [
@@ -337,6 +467,15 @@ def gradient_pam(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
+def gradient_png(tmp_path: Path) -> Path:
+    """The same gradient as `gradient_bmp`, as an RGB PNG with every filter in turn."""
+    width = height = 16
+    return write_png(
+        tmp_path / "gradient.png", width, height, gradient_pixels(width, height), filters=range(5)
+    )
+
+
+@pytest.fixture
 def gradient_npy(tmp_path: Path) -> Path:
     """The same gradient as `gradient_bmp`, as a bare NumPy array."""
     width = height = 16
@@ -363,12 +502,14 @@ def root(pytestconfig: pytest.Config) -> Path:
 def sample(root: Path) -> Sample:
     """Look up a file checked into ``data/`` by name, skipping if it is absent.
 
-    The samples are excluded from the sdist, so a test run against an unpacked
+    The samples sit in a folder per file type, named after the suffix, so
+    ``sample("earth.ppm")`` is ``data/ppm/earth.ppm`` and no test spells a
+    folder. They are excluded from the sdist, so a test run against an unpacked
     distribution has to cope with them being missing.
     """
 
     def lookup(name: str) -> Path:
-        path = root / "data" / name
+        path = root / "data" / Path(name).suffix.lstrip(".") / name
         if not path.exists():  # pragma: no cover - the sdist ships no samples
             pytest.skip(f"sample image missing: {path}")
         return path
@@ -380,6 +521,12 @@ def sample(root: Path) -> Sample:
 def sample_npy(sample: Sample) -> Path:
     """The 400x400 sample as a `.npy`, written by numpy from Pillow's array."""
     return sample("earth.npy")
+
+
+@pytest.fixture
+def sample_png(sample: Sample) -> Path:
+    """The 400x400 sample as a PNG, written by Netpbm's `pnmtopng` (libpng)."""
+    return sample("earth.png")
 
 
 @pytest.fixture

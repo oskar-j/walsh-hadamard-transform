@@ -19,13 +19,22 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from conftest import gradient_pixels, write_bmp, write_npy, write_pam, write_ppm, write_tiff
+from conftest import (
+    gradient_pixels,
+    write_bmp,
+    write_npy,
+    write_pam,
+    write_png,
+    write_ppm,
+    write_tiff,
+)
 from walsh.image import (
     BlockDescription,
     BMPImage,
     CustomizableImage,
     NPYImage,
     PAMImage,
+    PNGImage,
     PPMImage,
     RasterImage,
     TIFFImage,
@@ -66,6 +75,7 @@ FORWARD_ONLY = [
     ("PPM/P6", PPMImage, lambda t: write_ppm(t / "p.ppm", 2, 2, PIXELS)),
     ("PAM", PAMImage, lambda t: write_pam(t / "p.pam", 2, 2, PIXELS)),
     ("NPY", NPYImage, lambda t: write_npy(t / "p.npy", 2, 2, PIXELS)),
+    ("PNG", PNGImage, lambda t: write_png(t / "p.png", 2, 2, PIXELS, filters=(4, 3))),
 ]
 SEEKING = [
     ("BMP", BMPImage, lambda t: write_bmp(t / "p.bmp", 2, 2, PIXELS)),
