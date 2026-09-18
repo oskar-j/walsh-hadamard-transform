@@ -338,6 +338,10 @@ assignment would broadcast a scalar over a block, and `WalshHadamardTransform`
 overrides both with its one broadcast product. That override is what keeps the
 built-in path vectorised; `examples/compare_transforms.py` shows a subclass
 doing the same, and `tests/codec/test_custom_transform.py` runs that example.
+`examples/plot_transform.py` draws `doc/how_it_works.png` for the README
+(0.4.17): regenerate it after any change to the transform or the sample, and
+keep `pick_block`'s rule honest, since `tests/codec/test_plot_transform.py`
+checks the block it chooses against the caption's claim.
 
 `MatrixTransform` (0.4.14) is the public base for a separable orthonormal
 transform given by one matrix: `m @ src @ m.T`, inverse by the transpose,
@@ -524,6 +528,7 @@ by name, and v0.4.15 added pickled arrays and pixel lists as input, read
 through an allowlist so nothing in the file is executed, plus a generated
 table of contents in the README. v0.4.16 grouped the format modules and the
 tests into folders; the flat module paths such as `walsh.image.bmp` went with
-it, and `walsh.image` is the import path.
+it, and `walsh.image` is the import path. v0.4.17 added the README's
+explanatory figure, tagline sentences and a typed badge.
 Partially based on
 https://github.com/ktisha/python2012/tree/dee4beda8e22f3a66a3e31384d4b72ab66102e88/avereshchagin
