@@ -113,12 +113,19 @@ jobs:
           # on this runner's openblas as they do under macOS Accelerate, where
           # the reference was written. This is the cross-platform proof.
           # The samples sit in a folder per file type: data/ppm/earth.ppm.
-          for kind in ppm pam tiff npy pkl; do
+          # earth.png is compressed and filtered by libpng (Netpbm wrote it)
+          # and must still reach the transform as the same pixels.
+          for kind in ppm pam tiff npy pkl png; do
             /tmp/smoke/bin/walsh compress "data/$kind/earth.$kind" /tmp/smoke-earth.cim
             cmp data/cim/transformed_earth.cim /tmp/smoke-earth.cim
           done
           /tmp/smoke/bin/walsh extract data/cim/transformed_earth.cim /tmp/smoke-earth.ppm
           cmp data/ppm/recreated.ppm /tmp/smoke-earth.ppm
+          # A PNG is a zlib stream, whose bytes may differ between zlib builds,
+          # so the PNG written here is compared by the pixels it decodes to.
+          /tmp/smoke/bin/walsh extract data/cim/transformed_earth.cim /tmp/smoke-earth.png
+          /tmp/smoke/bin/python -c "from walsh.image import PNGImage, PPMImage; png = PNGImage(); png.load('/tmp/smoke-earth.png'); ppm = PPMImage(); ppm.set_array(png.get_array()); ppm.save('/tmp/smoke-earth-from-png.ppm')"
+          cmp data/ppm/recreated.ppm /tmp/smoke-earth-from-png.ppm
           echo "wheel smoke test passed"
 
       # The wheel is built from [tool.setuptools.packages.find] and cannot

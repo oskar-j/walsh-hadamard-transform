@@ -14,8 +14,8 @@ Compressing images with a Hadamard transform.
 A transform from the 1920s that needs nothing but additions and subtractions,
 turned into a complete image codec you can read in an afternoon. Every step of
 it is exact, so the same picture compresses to the same bytes on every machine,
-and six file formats go in and come out. A DCT and a Haar transform are on board
-to race it against, and more than six hundred tests keep all of it honest.
+and seven file formats go in and come out. A DCT and a Haar transform are on board
+to race it against, and more than seven hundred tests keep all of it honest.
 
 ![The sample image, before and after a compress and extract round trip](https://raw.githubusercontent.com/oskar-j/walsh-hadamard-transform/master/doc/sample_usage.jpg)
 
@@ -41,6 +41,7 @@ to race it against, and more than six hundred tests keep all of it honest.
 - [Releasing](#releasing)
 - [File formats](#file-formats)
   - [Input and output](#input-and-output)
+  - [PNG](#png)
   - [Pickled pixels](#pickled-pixels)
   - [The `.cim` container](#the-cim-container)
 <!-- /toc -->
@@ -145,6 +146,7 @@ picture can be compressed from one format and restored as another:
 ```
 walsh compress photo.ppm out.cim
 walsh extract  out.cim restored.bmp     # PPM in, BMP out
+walsh extract  out.cim restored.png     # or PNG out
 walsh extract  out.cim restored.tif     # or TIFF out
 walsh extract  out.cim restored.pam     # or PAM out
 walsh extract  out.cim restored.npy     # or a bare NumPy array
@@ -368,8 +370,9 @@ python examples/compare_transforms.py [image]
 
 ## Requirements
 
-The package needs `numpy` and `click` -- BMP parsing is done by hand with
-`struct`, and `click` powers the command line interface. `matplotlib` and
+The package needs `numpy` and `click` -- every format is parsed by hand with
+`struct`, PNG included, whose compression is the standard library's `zlib`, and
+`click` powers the command line interface. `matplotlib` and
 `Pillow` are needed only by the example script, and are declared as the `demo`
 extra. Versions are pinned in `pyproject.toml`;
 `requirements.txt`, `requirements-demo.txt` and `requirements-dev.txt` mirror
@@ -421,6 +424,7 @@ refuses to accept the same version twice.
 | Suffix | Format | Notes |
 | --- | --- | --- |
 | `.bmp` | Windows bitmap | 24-bit, single plane, uncompressed. Top-down (negative height) files are understood. |
+| `.png` | Portable Network Graphics | 8-bit RGB is read and written, and 8-bit RGBA is read **when it is opaque throughout**, which most everyday PNGs are. All five row filters are undone, any number of `IDAT` chunks, every chunk's CRC checked; `gAMA`, `sRGB`, `iCCP`, text and the like are skipped. Real transparency (an alpha below 255, or a `tRNS` colour some pixel has), palette, greyscale, 16-bit and interlaced files are rejected by name. See [PNG](#png). |
 | `.ppm`, `.pnm` | Netpbm portable pixmap | `P6` binary and `P3` ASCII are read; `P6` is written. Header comments are skipped and a `maxval` below 255 is rescaled. 16-bit samples are rejected. |
 | `.npy` | NumPy array | The raw pixel matrix in NumPy's own container, for images that already live in an array. Read: `uint8` of shape `(height, width, 3)` as RGB, `(height, width)` or `(height, width, 1)` as greyscale, and `(height, width, 4)` as RGBA only when fully opaque. Other dtypes, other channel counts, transparency and CMYK are rejected by name; pickled files are refused from the header and never loaded. Written as `(height, width, 3)` `uint8`, so `numpy.load` reads it back as is. Channel order is RGB; a BGR array, as OpenCV produces, is `array[..., ::-1]`. |
 | `.pkl`, `.pickle` | Pickled pixels | A pickled NumPy array, rows of `(r, g, b)` pixels, or a flat list of them with a declared size. Read through an allowlist, so **nothing in the file is ever executed**; rows of `(r, g, b)` tuples are written. See [Pickled pixels](#pickled-pixels). |
@@ -431,6 +435,50 @@ Every reader presents the same in-memory view -- RGB pixels, top row first --
 whatever the file itself stores. BMP is the awkward one on both counts, storing
 blue-green-red samples in bottom-up rows, and `BMPImage` converts in each
 direction. That shared contract is what makes cross-format conversion work.
+
+### PNG
+
+PNG is the one compressed format here, and the only one most people have
+pictures in. It costs the package nothing: a PNG's pixel rows sit in a zlib
+stream, the inflater is `zlib` in the standard library, and everything around
+it (chunks, CRCs, the five row filters) is read by hand, so there is still no
+image library behind `walsh`. The compression is lossless, so a PNG reaches the
+transform as exactly the pixels a PPM of the same picture would:
+`data/png/earth.png`, written by libpng, compresses to a `.cim` byte-identical
+to the one from `data/ppm/earth.ppm`.
+
+```
+walsh compress photo.png out.cim
+walsh extract  out.cim restored.png
+```
+
+Three of the five filters predict a byte from the pixel to its left, which was
+itself predicted, so a row cannot be undone in one step and the textbook
+decoder is a loop over every byte. Here the image is undone one *anti-diagonal*
+at a time instead: a pixel needs only its left, upper and upper-left
+neighbours, all of which lie on the two diagonals before its own, so each
+diagonal is a single array operation. A 2000x2000 PNG from libpng loads in
+about half a second, where a byte loop in Python takes five to twelve.
+
+Transparency is refused, not flattened. Dropping an alpha channel means
+choosing a background to put behind it, and nothing in the file says which, so
+an RGBA file is read only when every pixel is opaque, and the message counts
+the pixels that are not:
+
+```
+$ walsh compress logo.png out.cim
+Error: PNG has real transparency: alpha is below 255 in 1840 of 65536 pixels; only RGBA that is opaque throughout is supported
+```
+
+The files written are 8-bit RGB with a filter chosen per row, the same choice
+libpng makes, which keeps them 14% smaller on the samples here and half the
+size on a smooth picture. Their *bytes* are not reproducible from one machine
+to the next, because DEFLATE output may differ between zlib builds. Their
+pixels are, and that is how `data/png/recreated.png` is pinned.
+
+A small file cannot cost much memory: inflation stops at the size the header
+declares, and nothing is allocated from the header, only from what the stream
+delivers.
 
 ### Pickled pixels
 

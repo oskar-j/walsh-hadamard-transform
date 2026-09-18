@@ -52,8 +52,8 @@ exists, so aliases count. It belongs in the CLI, not in `Task`, whose
 
 `src/` layout, package name `walsh`, built with setuptools. Tests import the
 installed package, so an editable install must exist before `pytest` will work.
-`tests/conftest.py` exposes `write_bmp`, `write_ppm`, `write_pam`, `write_tiff`
-and `write_npy` helpers plus `gradient_*` and `sample_*` fixtures per format; test
+`tests/conftest.py` exposes `write_bmp`, `write_png`, `write_ppm`, `write_pam`,
+`write_tiff` and `write_npy` helpers plus `gradient_*` and `sample_*` fixtures per format; test
 modules import the helpers as `from conftest import ...`, which works at any
 depth because `[tool.pytest.ini_options] pythonpath = ["tests"]` says so.
 
@@ -64,8 +64,8 @@ src/walsh/image/            tests/
   __init__.py  registry       conftest.py        helpers, fixtures (root, sample)
   base.py      RasterImage    image/             test_base, test_cim, test_io,
   _io.py       staged writes                     test_streams, test_layout
-  cim.py       the container    raster/          test_bmp, test_tiff
-  raster/      bmp, tiff        netpbm/          test_ppm, test_pam
+  cim.py       the container    raster/          test_bmp, test_png, test_tiff
+  raster/      bmp, png, tiff   netpbm/          test_ppm, test_pam
   netpbm/      ppm, pam,        arrays/          test_npy, test_pickle
                _samples       codec/             test_task, test_transforms,
   arrays/      npy, pkl,                         test_custom_transform,
@@ -75,6 +75,13 @@ src/walsh/image/            tests/
                               project/           test_requirements_mirror,
                                                  test_readme_toc
 ```
+
+`data/` is grouped the same way since 0.5.0, a folder per file type named
+after the suffix: `data/ppm/earth.ppm`, `data/cim/transformed_earth.cim`. The
+`sample` fixture derives the folder from the name, so a test says
+`sample("earth.png")` and never spells a folder, and `MANIFEST.in` prunes
+`data/` whole instead of listing suffixes, a list that was forgotten once
+already (`.pkl`, 0.4.15).
 
 Three rules keep that working. Test folders have **no `__init__.py`**, so
 every test module's basename must be unique across the tree, and there must
@@ -167,8 +174,8 @@ inconsistent by design. `CustomizableImage` is deliberately not a
 `RasterImage`; it holds each channel as one `(count, edge, edge)` stack,
 `get_stack(channel)` is the array form, and `get_y_data()` and friends return
 views into it. `bmp.py` converts both ways (BMP is blue-green-red and
-bottom-up, two reversed views); `ppm.py`, `pam.py`, `tiff.py` and `npy.py`
-need no conversion.
+bottom-up, two reversed views); `png.py`, `ppm.py`, `pam.py`, `tiff.py` and
+`npy.py` need no conversion.
 
 `npy.py` (0.4.8) reads and writes NumPy's `.npy` container, the raw pixel
 matrix for images that already live in an array. The array carries no colour
@@ -233,6 +240,60 @@ writer emits the header in `pamtopam`'s order, so the two are byte-identical;
 the Netpbm tools (`pamvalidate`, `pamtopnm`) are the independent check when
 touching it.
 
+`png.py` (0.5.0, #17) is the one compressed format, and needs no dependency:
+the pixel rows sit in a zlib stream and the inflater is stdlib `zlib`;
+chunks, CRCs and filters are read by hand. One profile, the rest refused by
+name: 8-bit, colour type 2 or 6, not interlaced. **RGBA is read only when
+every pixel is opaque**, and an RGB file's `tRNS` colour counts as
+transparency when some pixel has it: `tRNS` is ancillary, so "skip every
+ancillary chunk" would flatten silently, and that is the one ancillary chunk
+the reader must look at. Flattening needs a background the file does not
+name, so it is refused with a pixel count. `_parse_header` tells a header
+the format forbids ("invalid") from one merely outside the profile
+("only ... is supported"), in that order. An unknown critical chunk
+(upper-case first letter) is refused as the format requires; `PLTE` is
+critical but in a truecolour file only suggests a palette, so it is skipped.
+**The filters are undone without a loop over pixels.** Sub, Average and Paeth
+predict from the pixel to the left, which was itself predicted, so the
+textbook decoder walks every byte, which #17 expected and which the rule
+under `task.py` forbids. A pixel needs only its left, upper and upper-left
+neighbours, all on the two anti-diagonals before its own, so
+`_undo_by_wavefront` copies a band into a skewed grid where each
+anti-diagonal is one contiguous row (`skewed[x + r + 1, r]`, row 0 being the
+row above the band) and undoes a diagonal per array operation: `width +
+rows` steps, 0.48 s for 2000x2000 against 5 to 12 s for a byte loop. Slots
+left of the image are never written and stay zero, which is the format's
+missing neighbour; the slice bounds exist to skip the slots outside the
+image, which are half of a square band's grid, not for correctness. A band with no Average or Paeth row goes through `_undo_by_rows`
+instead (Sub is a `uint8` running sum, Up adds the row above). Bands are
+`max(width, _MIN_BAND_ROWS)` rows because the grid is `(width + rows) *
+rows`: unbanded, a 100x40000 image would want gigabytes. `_predictors` is
+shared by the reader and the writer, so the test oracle is deliberately not:
+`build_png`, `png_filter_rows` and `png_unfilter_rows` in `conftest.py` work
+one byte at a time from the specification and share no code with `png.py`.
+Keep them that way. **Memory is bounded by what the stream delivers**:
+`_PixelStream` inflates through `decompressobj` clamped to the bytes the
+header declares (DEFLATE expands a thousandfold; the surplus is ignored, as
+libpng ignores it, and as the TIFF reader clamps its strips), allocates
+nothing from the header, and asks for at most `_INFLATE_STEP` at a time
+because a hostile header's budget overflows zlib's C length, a bug the
+gigabyte-header test found before release. The end of the zlib stream is not
+required, since each `IDAT` has its own CRC and libpng does not require it
+either; a missing `IEND` is "truncated" even with every pixel present. The
+writer chooses a filter per row by minimum sum of absolute differences
+(`_filter_rows`, one array pass per `_FILTER_BAND_ROWS` rows, banded only to
+hold its memory at 48 MiB instead of 195 for 2000x2000; the bands change no
+byte), which on `earth.ppm` is exactly libpng's choice and makes files 14%
+smaller than filter 0, which is what #17 had proposed before the array
+contract made the choice cheap. **A written PNG's bytes are not
+reproducible across zlib builds (zlib-ng differs), only its pixels are**:
+never pin a PNG byte for byte. `data/png/recreated.png` is compared by what
+it decodes to, in `test_golden.py` and in the CI smoke; `data/png/earth.png`
+came from Netpbm's `pnmtopng` (libpng, 37 `IDAT`s, Sub/Average/Paeth rows)
+and is the foreign-writer check, in the byte-exact compress lists like any
+other source. `pngtopam` / `pnmtopng` and Pillow are the independent checks
+when touching it.
+
 `tiff.py` supports exactly one TIFF profile — uncompressed, RGB, 8-bit, chunky,
 top-left — and rejects everything else by name rather than guessing. Its strip
 reader clamps every read to the bytes still outstanding (0.4.5, #23): repeated
@@ -291,8 +352,8 @@ from the umask, since `mkstemp` creates `0o600`.
 
 Adding a format means a new module in the family folder it belongs to (or a
 new folder, for a new family), subclassing `RasterImage`, plus an import and an
-entry in `SUFFIXES` in `image/__init__.py` and a test module in the matching
-`tests/image/` folder. Honour the RGB top-down contract there, not in `Task`. The contract
+entry in `SUFFIXES` in `image/__init__.py`, a test module in the matching
+`tests/image/` folder, and its samples in `data/<suffix>/`. Honour the RGB top-down contract there, not in `Task`. The contract
 is what makes the source format irrelevant to the output: `tests/codec/test_task.py`
 asserts that BMP, PPM, PAM and TIFF of one picture compress to byte-identical
 `.cim`.
@@ -426,7 +487,8 @@ between Accelerate and openblas and relaxed the checks to a tolerance; that
 machinery is gone and the CI wheel smoke compares with `cmp` on the Linux
 runner, which is the standing cross-platform proof. A deliberate change to
 the codec regenerates every `recreated.*` file and `transformed_earth.cim`
-in the same commit and states the change in the CHANGELOG.
+in the same commit and states the change in the CHANGELOG. `recreated.png`
+is the one output pinned by its pixels rather than its bytes (see `png.py`).
 `data/cim/transformed_earth.cim` is un-ignored in `.gitignore` explicitly — it
 was silently absent from CI until 0.4.11.
 
@@ -453,7 +515,8 @@ by a version bump without `uv lock`, fails with uv's own message rather than
 being re-resolved in the runner. The `build` job also unpacks the sdist and
 runs its tests from inside, the only check that can catch a `MANIFEST.in`
 regression, and smoke-tests the wheel against the reference `.cim` for every
-container and the reference decode, byte for byte. A `force_publish` retry of the release downloads the assets on the
+container and the reference decode, byte for byte, plus the PNG it writes,
+decoded and compared with `recreated.ppm`. A `force_publish` retry of the release downloads the assets on the
 existing GitHub Release rather than rebuilding, so PyPI gets the same bytes.
 `tests/project/test_requirements_mirror.py` keeps `requirements*.txt` equal to
 `pyproject.toml` (#24), and `tests/project/test_readme_toc.py` keeps the README's
@@ -490,6 +553,7 @@ own ships only `tests/test_*.py`: not `tests/conftest.py`, and not the test
 modules in subfolders, which would produce a sdist whose tests are mostly
 missing and whose remainder errors on absent fixtures. `recursive-include
 tests *.py` covers both, and CI's in-sdist test run is what would notice.
+`prune data` keeps the samples out, whatever suffixes arrive later.
 
 ## Typing
 
@@ -540,6 +604,8 @@ it, and `walsh.image` is the import path. v0.4.17 added the README's
 explanatory figure, tagline sentences and a typed badge. v0.4.18 closed #26 with the
 regression tests it asked for and took coverage to 100%. v0.4.19 made the
 tests take the repository root from pytest's rootdir rather than from
-`__file__`.
+`__file__`. **v0.5.0 added PNG** (#17), the first compressed format, through
+stdlib `zlib` with the row filters undone a diagonal at a time, and grouped
+`data/` into a folder per file type.
 Partially based on
 https://github.com/ktisha/python2012/tree/dee4beda8e22f3a66a3e31384d4b72ab66102e88/avereshchagin

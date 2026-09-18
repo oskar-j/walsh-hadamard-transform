@@ -25,7 +25,7 @@ __all__ = [
 #: ``reader_for(None)`` -- and not reachable from the CLI, whose arguments are
 #: paths. On the read side it also needs a **seekable** stdin for BMP, TIFF and
 #: ASCII PPM, which seek while parsing; a ``< file`` redirect provides one, a
-#: pipe does not. Binary PPM, PAM, ``.npy`` and ``.cim`` read forward only.
+#: pipe does not. Binary PPM, PAM, PNG, ``.npy`` and ``.cim`` read forward only.
 FileSource = str | PathLike[str] | None
 
 #: Prefix for the staging file :func:`open_binary_write` writes through. The

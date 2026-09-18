@@ -165,10 +165,11 @@ def compress(
 ) -> None:
     """Transform a raster image into a .cim file.
 
-    The input format is taken from the filename suffix: .bmp, .ppm, .pnm,
-    .pam, .tif, .tiff, .npy for a bare NumPy array, or .pkl / .pickle for a
-    pickled array or list of pixels. A pickle is read through an allowlist:
-    nothing in it is ever executed.
+    The input format is taken from the filename suffix: .bmp, .png, .ppm,
+    .pnm, .pam, .tif, .tiff, .npy for a bare NumPy array, or .pkl / .pickle
+    for a pickled array or list of pixels. A PNG must be 8-bit RGB, or RGBA
+    that is opaque throughout. A pickle is read through an allowlist: nothing
+    in it is ever executed.
     \f
     Args:
         input_path: Image to read.
@@ -217,8 +218,8 @@ def extract(input_path: str, output_path: str) -> None:
     \f
     Args:
         input_path: The .cim file to read.
-        output_path: Image to write, ending .bmp, .ppm, .pnm, .pam, .tif,
-            .tiff, .npy, .pkl or .pickle.
+        output_path: Image to write, ending .bmp, .png, .ppm, .pnm, .pam,
+            .tif, .tiff, .npy, .pkl or .pickle.
 
     Raises:
         click.ClickException: If the .cim file is malformed, or the output

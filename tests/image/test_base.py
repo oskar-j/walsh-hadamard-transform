@@ -7,7 +7,9 @@ from pathlib import Path
 import pytest
 
 
-@pytest.mark.parametrize("cls_name", ["BMPImage", "PPMImage", "PAMImage", "TIFFImage", "NPYImage"])
+@pytest.mark.parametrize(
+    "cls_name", ["BMPImage", "PNGImage", "PPMImage", "PAMImage", "TIFFImage", "NPYImage"]
+)
 @pytest.mark.parametrize(("width", "height", "count"), [(4, 4, 3), (2, 2, 16), (2, 2, 0)])
 def test_save_rejects_a_pixel_count_that_contradicts_the_dimensions(
     tmp_path: Path, cls_name: str, width: int, height: int, count: int
@@ -32,7 +34,9 @@ def test_save_rejects_a_pixel_count_that_contradicts_the_dimensions(
     assert not path.exists(), "a rejected save must not leave a file behind"
 
 
-@pytest.mark.parametrize("cls_name", ["BMPImage", "PPMImage", "PAMImage", "TIFFImage", "NPYImage"])
+@pytest.mark.parametrize(
+    "cls_name", ["BMPImage", "PNGImage", "PPMImage", "PAMImage", "TIFFImage", "NPYImage"]
+)
 def test_save_accepts_an_exactly_matching_pixel_count(tmp_path: Path, cls_name: str) -> None:
     """The guard must not reject the ordinary case."""
     import walsh.image as image_package

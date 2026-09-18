@@ -6,7 +6,7 @@ file itself stores. :func:`reader_for` picks the class to use from a filename.
 
 This was a single ``image.py`` module up to 0.1.3; the names it exported are
 re-exported here, so existing imports keep working. The format modules are
-grouped by family: :mod:`~walsh.image.raster` (BMP, TIFF),
+grouped by family: :mod:`~walsh.image.raster` (BMP, PNG, TIFF),
 :mod:`~walsh.image.netpbm` (PPM, PAM) and :mod:`~walsh.image.arrays` (``.npy``,
 pickles). Import their classes from this package rather than from those
 modules, whose paths are an implementation detail.
@@ -38,6 +38,7 @@ from walsh.image.raster.bmp import (
     BMP_SIGNATURE,
     BMPImage,
 )
+from walsh.image.raster.png import PNG_SIGNATURE, PNGImage
 from walsh.image.raster.tiff import TIFF_BIG_ENDIAN, TIFF_LITTLE_ENDIAN, TIFF_MAGIC, TIFFImage
 
 __all__ = [
@@ -54,6 +55,7 @@ __all__ = [
     "PAM_MAGIC",
     "PAM_TUPLTYPE",
     "PICKLE_PROTOCOL",
+    "PNG_SIGNATURE",
     "PPM_ASCII_MAGIC",
     "PPM_BINARY_MAGIC",
     "PPM_MAX_SAMPLE",
@@ -67,6 +69,7 @@ __all__ = [
     "FileSource",
     "NPYImage",
     "PAMImage",
+    "PNGImage",
     "PPMImage",
     "PickleImage",
     "Pixel",
@@ -87,13 +90,15 @@ __all__ = [
 #: older Netpbm formats and is treated as PPM, the only one of those
 #: supported; PAM has its own ``.pam``. ``.npy`` is a bare NumPy array, and
 #: ``.pkl`` / ``.pickle`` a pickled array or list of pixels, read through an
-#: allowlist so that nothing in the file is executed.
+#: allowlist so that nothing in the file is executed. ``.png`` is the one
+#: compressed format, inflated by the standard library's zlib.
 SUFFIXES: dict[str, type[RasterImage]] = {
     ".bmp": BMPImage,
     ".npy": NPYImage,
     ".pam": PAMImage,
     ".pickle": PickleImage,
     ".pkl": PickleImage,
+    ".png": PNGImage,
     ".ppm": PPMImage,
     ".pnm": PPMImage,
     ".tif": TIFFImage,
