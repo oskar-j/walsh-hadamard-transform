@@ -9,7 +9,7 @@
 [![Stars](https://img.shields.io/github/stars/oskar-j/walsh-hadamard-transform)](https://github.com/oskar-j/walsh-hadamard-transform/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Compressing images with a Hadamard transform
+Compressing images with a Hadamard transform.
 
 A transform from the 1920s that needs nothing but additions and subtractions,
 turned into a complete image codec you can read in an afternoon. Every step of
