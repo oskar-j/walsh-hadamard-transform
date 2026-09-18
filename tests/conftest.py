@@ -92,12 +92,16 @@ def build_tiff(
     orientation: int = 1,
     rows_per_strip: int | None = None,
     omit: set[int] | None = None,
+    extra_entries: list[tuple[int, int, int, int]] | None = None,
 ) -> bytes:
     """Build an uncompressed TIFF, with hooks for the unsupported profiles.
 
     The keyword arguments exist so tests can produce files this reader must
     reject -- compressed, palette, 16-bit, planar, rotated -- which Pillow will
-    not emit on request.
+    not emit on request. ``extra_entries`` appends ``(tag, type, count,
+    value)`` directory entries verbatim, the value being the four-byte
+    value-or-offset field; a type this reader keeps opaque may point anywhere
+    in the file, since its bytes are read and discarded.
     """
     prefix = ">" if order == b"MM" else "<"
     omit = omit or set()
@@ -125,6 +129,7 @@ def build_tiff(
         (284, 3, 1, planar),
     ]
     entries = [e for e in entries if e[0] not in omit]
+    entries += [(tag, kind, count, value) for tag, kind, count, value in extra_entries or []]
 
     directory_size = 2 + len(entries) * 12 + 4
     cursor = 8 + directory_size

@@ -9,6 +9,46 @@ The `## [x.y.z]` headings are load-bearing: the release workflow extracts the
 section matching the version in `pyproject.toml` and uses it as the GitHub
 Release notes.
 
+## [0.4.18]
+
+### Added
+
+- The regression tests #26 asked for, filed against 0.4.2 and partly
+  overtaken since: the golden tests came with 0.4.10, the reference `.cim`
+  was tracked in 0.4.11, the stale `--coeff-removal` help text went in
+  0.4.9. What remained is here. Codec output is unchanged; the golden tests
+  are what says so.
+- **Coefficient removal is proven to bite.** The command-line test used
+  `--coeff-removal 0.5`, a value below every coefficient of its fixture, so a
+  byte comparison there would have asserted nothing; it now compares a
+  default run against 0.5 (identical) and 500 (different, same size). A
+  library test pins the ladder on the 16x16 gradient: 30, 30, 14 and 5
+  non-zero coefficients of 96 at no threshold, 0.5, 100 and 500, and every
+  survivor at or above the threshold.
+- **Every TIFF guard that only a foreign file can reach.** A file without
+  strip offsets, an unknown field type, a value offset past the end of the
+  file, a directory that ends inside an entry, and a strip byte count short
+  of the pixels: each refused with its own message. Tags this profile never
+  decodes, in RATIONAL, ASCII, multi-SHORT and LONG form, are read past
+  rather than refused, which is the path ordinary third-party files take.
+  And the interoperability claim is pinned: Pillow's default TIFF and one
+  with a resolution both load pixel for pixel, and Pillow reads what this
+  writer produces (skipped where Pillow is absent).
+- A `.cim` saved without block descriptions is an error that writes nothing,
+  and P3 samples separated by any run of whitespace, blank lines included,
+  load correctly.
+- The test fixture builder gains `extra_entries` for appending arbitrary
+  TIFF directory entries.
+
+### Notes
+
+- Coverage 99.12% to **100.00%**, branches included, with no `pragma: no
+  cover` added. The issue's mutations, adapted to today's code, are each
+  caught: dropping the threshold in `Task` fails 5 tests, halving the chroma
+  block default fails 9, refusing opaque TIFF field types fails 3. Before
+  0.4.10 all of them shipped green.
+- 620 to 634 tests. Run locally on 3.10 through 3.14 with the demo extra.
+
 ## [0.4.17]
 
 ### Added

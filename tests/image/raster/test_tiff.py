@@ -237,3 +237,121 @@ def test_strips_beyond_the_declared_pixels_are_rejected(tmp_path: Path) -> None:
 
     with pytest.raises(UnsupportedFileFormatError, match="lies beyond the 192 bytes"):
         TIFFImage().load(str(path))
+
+
+# --- every guard only a file we did not write can reach (#26) -------------------
+
+
+def _entry(prefix: str, tag: int, field_type: int, count: int) -> bytes:
+    return struct.pack(f"{prefix}HHI", tag, field_type, count)
+
+
+def test_a_file_without_strip_offsets_is_refused(tmp_path: Path) -> None:
+    path = tmp_path / "no-offsets.tif"
+    path.write_bytes(build_tiff(2, 2, gradient_pixels(2, 2), omit={273}))
+    with pytest.raises(UnsupportedFileFormatError, match="TIFF has no strip offsets"):
+        TIFFImage().load(str(path))
+
+
+def test_an_unknown_field_type_is_refused_by_number(tmp_path: Path) -> None:
+    data = build_tiff(2, 2, gradient_pixels(2, 2))
+    compression = _entry("<", 259, 3, 1)
+    assert data.count(compression) == 1
+    path = tmp_path / "type99.tif"
+    path.write_bytes(data.replace(compression, _entry("<", 259, 99, 1)))
+    with pytest.raises(UnsupportedFileFormatError, match="unknown TIFF field type 99"):
+        TIFFImage().load(str(path))
+
+
+def test_a_value_offset_past_the_end_of_the_file_is_refused(tmp_path: Path) -> None:
+    """BitsPerSample holds three SHORTs, six bytes, so it lives out of line."""
+    data = build_tiff(2, 2, gradient_pixels(2, 2))
+    bits = _entry("<", 258, 3, 3)
+    at = data.index(bits) + len(bits)
+    beyond = len(data) * 4
+    path = tmp_path / "beyond.tif"
+    path.write_bytes(data[:at] + struct.pack("<I", beyond) + data[at + 4 :])
+    with pytest.raises(
+        UnsupportedFileFormatError, match=f"TIFF field at offset {beyond} runs past the end"
+    ):
+        TIFFImage().load(str(path))
+
+
+def test_a_directory_that_ends_inside_an_entry_is_refused(tmp_path: Path) -> None:
+    """Header, a count of two, one whole entry, five bytes of the second."""
+    data = (
+        struct.pack("<2sHI", b"II", 42, 8)
+        + struct.pack("<H", 2)
+        + _entry("<", 256, 4, 1)
+        + struct.pack("<I", 2)
+        + b"\x01\x01\x03\x00\x01"
+    )
+    assert len(data) == 27
+    path = tmp_path / "cut.tif"
+    path.write_bytes(data)
+    with pytest.raises(UnsupportedFileFormatError, match="truncated TIFF directory entry 1 of 2"):
+        TIFFImage().load(str(path))
+
+
+def test_a_strip_byte_count_short_of_the_pixels_is_refused(tmp_path: Path) -> None:
+    """One strip of a 2x2 image is 12 bytes, and its count sits inline."""
+    data = build_tiff(2, 2, gradient_pixels(2, 2))
+    counts = _entry("<", 279, 4, 1) + struct.pack("<I", 12)
+    assert data.count(counts) == 1
+    path = tmp_path / "short.tif"
+    path.write_bytes(data.replace(counts, _entry("<", 279, 4, 1) + struct.pack("<I", 6)))
+    with pytest.raises(
+        UnsupportedFileFormatError, match="truncated TIFF pixel data: expected 12 bytes, got 6"
+    ):
+        TIFFImage().load(str(path))
+
+
+@pytest.mark.parametrize(
+    ("tag", "field_type", "count", "name"),
+    [
+        (282, 5, 1, "XResolution, RATIONAL"),
+        (306, 2, 20, "DateTime, ASCII"),
+        (339, 3, 3, "SampleFormat, three SHORTs"),
+        (34665, 4, 1, "an Exif IFD pointer, LONG"),
+    ],
+)
+def test_tags_this_profile_never_needs_are_skipped_not_refused(
+    tag: int, field_type: int, count: int, name: str, tmp_path: Path
+) -> None:
+    """Ordinary third-party files carry resolution, dates and more, in types
+    the reader never decodes. They must be read past, whether inline or out
+    of line, and the picture must come back unchanged."""
+    pixels = gradient_pixels(3, 2)
+    path = tmp_path / "tagged.tif"
+    # An out-of-line value may point anywhere: the bytes are discarded.
+    path.write_bytes(build_tiff(3, 2, pixels, extra_entries=[(tag, field_type, count, 8)]))
+    image = TIFFImage()
+    image.load(str(path))
+    assert image.get_dimensions() == (3, 2), name
+    assert image.get_raw_data() == pixels, name
+
+
+def test_pillow_tiffs_load_and_pillow_reads_ours(tmp_path: Path) -> None:
+    """The interoperability claim, pinned: every other TIFF the suite parses,
+    the suite wrote. Pillow's default file and one with a resolution, which
+    adds RATIONAL tags this reader keeps opaque, must both load, and Pillow
+    must read what this writer produces."""
+    Image = pytest.importorskip("PIL.Image")
+    import numpy as np
+
+    pixels = gradient_pixels(5, 4)
+    array = np.array(pixels, dtype=np.uint8).reshape(4, 5, 3)
+    picture = Image.fromarray(array)
+    for name, options in (("plain", {}), ("with-dpi", {"dpi": (72, 72)})):
+        path = tmp_path / f"{name}.tiff"
+        picture.save(path, format="TIFF", **options)
+        image = TIFFImage()
+        image.load(str(path))
+        assert image.get_dimensions() == (5, 4), name
+        assert image.get_raw_data() == pixels, name
+
+    ours = tmp_path / "ours.tiff"
+    image.save(str(ours))
+    with Image.open(ours) as read_back:
+        assert read_back.size == (5, 4)
+        assert np.array_equal(np.asarray(read_back.convert("RGB")), array)
