@@ -93,7 +93,7 @@ def round_trip(
 
 
 def main() -> None:
-    source = Path(sys.argv[1]) if len(sys.argv) > 1 else DATA / "earth.ppm"
+    source = Path(sys.argv[1]) if len(sys.argv) > 1 else DATA / "ppm" / "earth.ppm"
     print(f"{source.name}, luma blocks of 8, chroma blocks of 16\n")
     print(f"{'kept per axis':>13}  {'bytes':>9}  " + "  ".join(f"{n:>16}" for n in TRANSFORMS))
     with tempfile.TemporaryDirectory() as tmp:

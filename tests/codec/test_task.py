@@ -243,7 +243,7 @@ def test_extract_to_any_format_gives_the_same_picture(
 def test_checked_in_samples_agree_across_containers(
     sample_ppm: Path, sample_tiff: Path, sample_pam: Path, sample_npy: Path, tmp_path: Path
 ) -> None:
-    """data/earth.ppm, .tiff, .pam and .npy are one picture in four containers."""
+    """The `earth` samples under data/ are one picture in several containers."""
     digests = []
     for source in (sample_ppm, sample_tiff, sample_pam, sample_npy):
         output = tmp_path / f"{source.suffix.lstrip('.')}.cim"

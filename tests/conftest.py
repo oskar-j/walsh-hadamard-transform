@@ -363,12 +363,14 @@ def root(pytestconfig: pytest.Config) -> Path:
 def sample(root: Path) -> Sample:
     """Look up a file checked into ``data/`` by name, skipping if it is absent.
 
-    The samples are excluded from the sdist, so a test run against an unpacked
+    The samples sit in a folder per file type, named after the suffix, so
+    ``sample("earth.ppm")`` is ``data/ppm/earth.ppm`` and no test spells a
+    folder. They are excluded from the sdist, so a test run against an unpacked
     distribution has to cope with them being missing.
     """
 
     def lookup(name: str) -> Path:
-        path = root / "data" / name
+        path = root / "data" / Path(name).suffix.lstrip(".") / name
         if not path.exists():  # pragma: no cover - the sdist ships no samples
             pytest.skip(f"sample image missing: {path}")
         return path

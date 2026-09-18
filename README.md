@@ -135,8 +135,8 @@ pip install -e ".[demo]" -r requirements-dev.txt
 ### Command line
 
 ```
-walsh compress data/image.bmp data/transformed.cim
-walsh extract  data/transformed.cim data/recreated.bmp
+walsh compress data/bmp/image.bmp data/cim/transformed.cim
+walsh extract  data/cim/transformed.cim data/bmp/recreated.bmp
 ```
 
 The format is taken from the filename suffix, so PPM works the same way, and a
@@ -184,7 +184,7 @@ images are refused with a message naming the block size that would fit them:
 smaller than the given magnitude are zeroed. It does not change the `.cim`
 file's size, because the format stores a fixed count of `int16` values whether
 or not they are zero, but it makes the result far more compressible. On
-`data/earth.ppm`:
+`data/ppm/earth.ppm`:
 
 | `--coeff-removal` | non-zero coefficients | gzipped `.cim` | PSNR |
 | --- | --- | --- | --- |
@@ -197,7 +197,7 @@ That table was measured at the default block sizes, 8 for luma and 16 for
 chroma, and the threshold is an **absolute** magnitude, so its effect depends
 on them. The surviving low-frequency coefficients grow with the block edge,
 and the same number prunes less at a larger one. The same `--coeff-removal
-25` on `data/earth.ppm`, with luma and chroma blocks set equal:
+25` on `data/ppm/earth.ppm`, with luma and chroma blocks set equal:
 
 | block edge | non-zero coefficients | zeroed | gzipped `.cim` |
 | --- | --- | --- | --- |
@@ -261,7 +261,7 @@ usage error such as a missing file or an unknown option.
 ```python
 from walsh import Task
 
-Task().with_action("compress").with_input("data/image.bmp").with_output("out.cim").run()
+Task().with_action("compress").with_input("data/bmp/image.bmp").with_output("out.cim").run()
 Task().with_action("extract").with_input("out.cim").with_output("back.bmp").run()
 ```
 
@@ -281,7 +281,7 @@ ship with the package and are selected by name, in any case:
 ```python
 from walsh import Task
 
-Task(transform="dct").with_action("compress").with_input("data/earth.ppm").with_output(
+Task(transform="dct").with_action("compress").with_input("data/ppm/earth.ppm").with_output(
     "dct.cim"
 ).run()
 Task(transform="dct").with_action("extract").with_input("dct.cim").with_output("back.ppm").run()
@@ -335,7 +335,7 @@ class Hartley(MatrixTransform):
         return (np.cos(angle) + np.sin(angle)) / np.sqrt(size)
 
 
-Task(transform=Hartley()).with_action("compress").with_input("data/earth.ppm").with_output(
+Task(transform=Hartley()).with_action("compress").with_input("data/ppm/earth.ppm").with_output(
     "hartley.cim"
 ).run()
 ```

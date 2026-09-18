@@ -24,7 +24,7 @@ not work. `demo` is a real extra (matplotlib + Pillow, for
 Run the codec end to end:
 
 ```
-walsh compress data/image.bmp out.cim
+walsh compress data/bmp/image.bmp out.cim
 walsh extract out.cim back.bmp
 python examples/roundtrip.py    # same thing plus matplotlib plots
 ```
@@ -188,7 +188,7 @@ label so each format's messages name it. Versions 1.0 and 2.0 are accepted; 3.0 
 structured dtypes and is rejected by name. The writer is `np.save` of a
 C-ordered `(h, w, 3)` `uint8` through the staged `open_binary_write`, so its
 bytes are deterministic and byte-identical to `np.save` of the same array —
-`data/earth.npy` was written by numpy from Pillow's array and the writer
+`data/npy/earth.npy` was written by numpy from Pillow's array and the writer
 reproduces it exactly, which is the foreign-writer check.
 
 `pkl.py` (0.4.15) reads `.pkl` / `.pickle`: a pickled NumPy array, rows of
@@ -220,7 +220,7 @@ was a real bug during development, caught by mypy's complaint about the type.
 Samples must be `int` or `np.integer`, never `bool` or float, and in 0-255,
 checked before the cast so nothing wraps. The writer emits rows of tuples of
 plain `int` at protocol 4: loadable without NumPy, and byte-stable across
-NumPy versions, which a pickled array is not. `data/earth.pkl` is a pickled
+NumPy versions, which a pickled array is not. `data/pkl/earth.pkl` is a pickled
 array written under NumPy 2 and is in the golden test and the CI `cmp` loop.
 
 `netpbm/_samples.py` holds what PPM and PAM share, since their rasters are identical
@@ -427,7 +427,7 @@ machinery is gone and the CI wheel smoke compares with `cmp` on the Linux
 runner, which is the standing cross-platform proof. A deliberate change to
 the codec regenerates every `recreated.*` file and `transformed_earth.cim`
 in the same commit and states the change in the CHANGELOG.
-`data/transformed_earth.cim` is un-ignored in `.gitignore` explicitly — it
+`data/cim/transformed_earth.cim` is un-ignored in `.gitignore` explicitly — it
 was silently absent from CI until 0.4.11.
 
 Multiprocessing was considered for the matrix build and rejected: the build
@@ -441,7 +441,7 @@ numpy releases the GIL inside them.
 
 - **Coefficients are rounded (`np.rint`) on write.** The Python 2 original
   relied on `struct.pack` implicitly truncating floats. Output therefore differs
-  from the pre-port `data/recreated.bmp` by at most 2 per channel (mean 0.33).
+  from the pre-port `data/bmp/recreated.bmp` by at most 2 per channel (mean 0.33).
 - **`_KWARGS_MARKER` in `decorators.py` must stay module level.** A per-call
   sentinel would make every cache lookup miss.
 

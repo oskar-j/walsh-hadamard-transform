@@ -6,7 +6,7 @@ by how much. Since 0.4.12 (#39) the transform's arithmetic is exact, so both
 directions are byte-exact on every platform and BLAS library, and these tests
 are plain equality again: 0.4.11 had to allow a one-step rounding difference
 between Apple's Accelerate and scipy-openblas, and the wheel smoke in CI runs
-the same comparison with `cmp`. `data/transformed_earth.cim` was written by
+the same comparison with `cmp`. `data/cim/transformed_earth.cim` was written by
 0.4.12 on macOS; CI proves the Linux runner produces the same bytes.
 """
 

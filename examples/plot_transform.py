@@ -37,7 +37,7 @@ from matplotlib.colors import SymLogNorm
 from matplotlib.patches import Rectangle
 
 ROOT = Path(__file__).resolve().parent.parent
-SOURCE = ROOT / "data" / "earth.ppm"
+SOURCE = ROOT / "data" / "ppm" / "earth.ppm"
 OUTPUT = ROOT / "doc" / "how_it_works.png"
 
 EDGE = 8
