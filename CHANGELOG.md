@@ -9,6 +9,31 @@ The `## [x.y.z]` headings are load-bearing: the release workflow extracts the
 section matching the version in `pyproject.toml` and uses it as the GitHub
 Release notes.
 
+## [0.4.17]
+
+### Added
+
+- A figure in the README's Description explaining how the transform works,
+  generated from the Blue Marble sample by `examples/plot_transform.py`
+  (needs the `demo` extra): the eight Walsh functions, the 64 basis images of
+  an 8x8 block with the 16 the codec keeps outlined, and one real block going
+  through the codec, its coefficients annotated. The block shown is the
+  highest-contrast one whose kept corner holds at least 99% of its energy,
+  chosen deterministically, and the caption states the measured share and
+  reconstruction error rather than a claim. Tests render the figure and check
+  the choice.
+- Three sentences under the tagline saying what the project is, all of them
+  checked against the code: additions and subtractions only, exact output on
+  every machine, six formats, two transforms to compare against, more than
+  six hundred tests.
+- A "types: typed" badge, read live from PyPI, and the `Typing :: Typed`
+  classifier it reads. The package has shipped `py.typed` and been checked by
+  strict mypy for a long time; the metadata now says so.
+
+### Notes
+
+- 616 to 620 tests. Run locally on 3.10 through 3.14.
+
 ## [0.4.16]
 
 ### Changed
