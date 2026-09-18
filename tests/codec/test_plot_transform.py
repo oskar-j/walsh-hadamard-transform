@@ -10,18 +10,17 @@ from types import ModuleType
 import numpy as np
 import pytest
 
-from conftest import DATA_DIR, ROOT
+from conftest import Sample
 
-EXAMPLE = ROOT / "examples" / "plot_transform.py"
-FIGURE = ROOT / "doc" / "how_it_works.png"
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
 
-def _load_example() -> ModuleType:
+def _load_example(root: Path) -> ModuleType:
     pytest.importorskip("matplotlib")
-    if not EXAMPLE.exists():  # pragma: no cover - a distribution without examples
-        pytest.skip(f"example missing: {EXAMPLE}")
-    spec = importlib.util.spec_from_file_location("plot_transform", EXAMPLE)
+    path = root / "examples" / "plot_transform.py"
+    if not path.exists():  # pragma: no cover - a distribution without examples
+        pytest.skip(f"example missing: {path}")
+    spec = importlib.util.spec_from_file_location("plot_transform", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
@@ -29,26 +28,20 @@ def _load_example() -> ModuleType:
     return module
 
 
-def test_the_figure_renders_from_the_sample(tmp_path: Path) -> None:
-    example = _load_example()
-    source = DATA_DIR / "earth.ppm"
-    if not source.exists():  # pragma: no cover - the sdist ships no samples
-        pytest.skip("sample image missing")
-    output = example.main(tmp_path / "figure.png", source)
+def test_the_figure_renders_from_the_sample(root: Path, sample: Sample, tmp_path: Path) -> None:
+    example = _load_example(root)
+    output = example.main(tmp_path / "figure.png", sample("earth.ppm"))
     data = output.read_bytes()
     assert data[:8] == PNG_MAGIC
     assert len(data) > 50_000, "a blank or broken figure is far smaller"
 
 
-def test_the_block_shown_is_one_the_kept_corner_represents_well() -> None:
+def test_the_block_shown_is_one_the_kept_corner_represents_well(root: Path, sample: Sample) -> None:
     """The figure's claim is checked, not just drawn: the chosen block keeps at
     least the promised share of its energy in the 16 coefficients, and the
     choice is deterministic so the figure is reproducible."""
-    example = _load_example()
-    source = DATA_DIR / "earth.ppm"
-    if not source.exists():  # pragma: no cover - the sdist ships no samples
-        pytest.skip("sample image missing")
-    plane = example.luma_plane(source)
+    example = _load_example(root)
+    plane = example.luma_plane(sample("earth.ppm"))
     top, left = example.pick_block(plane)
     assert (top, left) == example.pick_block(plane)
     assert top % 8 == 0 and left % 8 == 0
@@ -60,8 +53,8 @@ def test_the_block_shown_is_one_the_kept_corner_represents_well() -> None:
     assert block.std() > 20, "a flat block would satisfy the share trivially"
 
 
-def test_pick_block_prefers_contrast_among_well_kept_blocks() -> None:
-    example = _load_example()
+def test_pick_block_prefers_contrast_among_well_kept_blocks(root: Path) -> None:
+    example = _load_example(root)
     rng = np.random.default_rng(seed=53)
     plane = np.full((16, 16), 100.0)
     plane[:8, :8] += rng.uniform(-60, 60, size=(8, 8))  # texture: poorly kept
@@ -71,7 +64,8 @@ def test_pick_block_prefers_contrast_among_well_kept_blocks() -> None:
     assert example.pick_block(plane) == (8, 8)
 
 
-def test_the_checked_in_figure_is_a_png() -> None:
-    if not FIGURE.exists():  # pragma: no cover - a distribution without doc/
+def test_the_checked_in_figure_is_a_png(root: Path) -> None:
+    figure = root / "doc" / "how_it_works.png"
+    if not figure.exists():  # pragma: no cover - a distribution without doc/
         pytest.skip("figure missing")
-    assert FIGURE.read_bytes()[:8] == PNG_MAGIC
+    assert figure.read_bytes()[:8] == PNG_MAGIC

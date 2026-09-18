@@ -61,7 +61,7 @@ Neither tree is flat (0.4.16). The tests mirror the source:
 
 ```
 src/walsh/image/            tests/
-  __init__.py  registry       conftest.py        helpers, fixtures, ROOT, DATA_DIR
+  __init__.py  registry       conftest.py        helpers, fixtures (root, sample)
   base.py      RasterImage    image/             test_base, test_cim, test_io,
   _io.py       staged writes                     test_streams, test_layout
   cim.py       the container    raster/          test_bmp, test_tiff
@@ -78,10 +78,17 @@ src/walsh/image/            tests/
 
 Three rules keep that working. Test folders have **no `__init__.py`**, so
 every test module's basename must be unique across the tree, and there must
-be no second `conftest.py`. A test that needs a repository path takes `ROOT`
-or `DATA_DIR` from `conftest` instead of counting `parent` hops, which broke
-for four files the day the folders appeared; `test_readme_toc.py` is the one
-exception, because it also runs as a script. And **`walsh.image` is the
+be no second `conftest.py`. A test that needs a repository path takes the
+`root` fixture, or `sample` for a file in `data/` (it skips when the sdist
+has not shipped one), and **never counts `parent` hops from `__file__`**:
+that broke for four files the day the folders appeared. `root` is pytest's
+rootdir (`pytestconfig.rootpath`), anchored by the `[tool.pytest.ini_options]`
+table in `pyproject.toml`, and it asserts that `pyproject.toml` is there,
+because a wrong rootdir would otherwise turn every golden test into a quiet
+skip (0.4.19). A path is therefore never a module-level constant in a test:
+build it inside the test from the fixture. `test_readme_toc.py` also runs as
+a script, where there is no pytest configuration, and takes the README from
+the working directory or its argument. And **`walsh.image` is the
 import path; where a class lives below it is an implementation detail.** The
 flat paths of 0.4.15 and earlier (`walsh.image.bmp` and its siblings) were
 dropped in the move rather than aliased: compatibility scaffolding would
@@ -451,8 +458,8 @@ existing GitHub Release rather than rebuilding, so PyPI gets the same bytes.
 `tests/project/test_requirements_mirror.py` keeps `requirements*.txt` equal to
 `pyproject.toml` (#24), and `tests/project/test_readme_toc.py` keeps the README's
 table of contents equal to its headings: after renaming or adding a heading,
-run `python tests/project/test_readme_toc.py` to regenerate the block between the
-`<!-- toc -->` markers.
+run `python tests/project/test_readme_toc.py` from the repository root to
+regenerate the block between the `<!-- toc -->` markers.
 
 ## Coverage gate
 
@@ -531,6 +538,8 @@ table of contents in the README. v0.4.16 grouped the format modules and the
 tests into folders; the flat module paths such as `walsh.image.bmp` went with
 it, and `walsh.image` is the import path. v0.4.17 added the README's
 explanatory figure, tagline sentences and a typed badge. v0.4.18 closed #26 with the
-regression tests it asked for and took coverage to 100%.
+regression tests it asked for and took coverage to 100%. v0.4.19 made the
+tests take the repository root from pytest's rootdir rather than from
+`__file__`.
 Partially based on
 https://github.com/ktisha/python2012/tree/dee4beda8e22f3a66a3e31384d4b72ab66102e88/avereshchagin

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import struct
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -9,13 +10,10 @@ import pytest
 
 from walsh.image import BMP_HEADER_FORMAT, BMP_PIXEL_OFFSET, BMP_SIGNATURE, align
 
-#: The repository root. Test modules live at different depths below ``tests/``,
-#: so they take the root from here rather than counting ``parent`` hops.
-ROOT = Path(__file__).resolve().parent.parent
-
-DATA_DIR = ROOT / "data"
-
 Pixel = tuple[int, int, int]
+
+#: What the `sample` fixture hands out: a checked-in file's name to its path.
+Sample = Callable[[str], Path]
 
 
 def write_bmp(path: Path, width: int, height: int, pixels: list[Pixel]) -> Path:
@@ -345,43 +343,64 @@ def gradient_npy(tmp_path: Path) -> Path:
     return write_npy(tmp_path / "gradient.npy", width, height, gradient_pixels(width, height))
 
 
-@pytest.fixture
-def sample_npy() -> Path:
-    """The 400x400 sample as a `.npy`, written by numpy from Pillow's array."""
-    return _sample("earth.npy")
+@pytest.fixture(scope="session")
+def root(pytestconfig: pytest.Config) -> Path:
+    """The repository root, which is pytest's own rootdir.
+
+    pytest anchors its rootdir at the ``pyproject.toml`` whose
+    ``[tool.pytest.ini_options]`` table configured the run, from any working
+    directory and for a test at any depth, so nothing here counts folders up
+    from ``__file__``. The check turns a rootdir that landed somewhere else
+    (a ``--rootdir`` or ``-c`` override, or that table going missing) into an
+    error: without it every test that needs a sample would skip instead.
+    """
+    path = pytestconfig.rootpath
+    assert (path / "pyproject.toml").is_file(), f"pytest's rootdir {path} is not the repository"
+    return path
 
 
-@pytest.fixture
-def sample_pam() -> Path:
-    """The 400x400 sample pixmap checked in as a PAM."""
-    return _sample("earth.pam")
-
-
-@pytest.fixture
-def sample_tiff() -> Path:
-    """The 400x400 sample pixmap checked in as an uncompressed TIFF."""
-    return _sample("earth.tiff")
-
-
-@pytest.fixture
-def sample_bmp() -> Path:
-    """The 400x400 sample bitmap checked into the repository."""
-    return _sample("image.bmp")
-
-
-@pytest.fixture
-def sample_ppm() -> Path:
-    """The 400x400 sample pixmap checked into the repository."""
-    return _sample("earth.ppm")
-
-
-def _sample(name: str) -> Path:
-    """Return a checked-in sample image, skipping if it is not present.
+@pytest.fixture(scope="session")
+def sample(root: Path) -> Sample:
+    """Look up a file checked into ``data/`` by name, skipping if it is absent.
 
     The samples are excluded from the sdist, so a test run against an unpacked
     distribution has to cope with them being missing.
     """
-    path = DATA_DIR / name
-    if not path.exists():  # pragma: no cover
-        pytest.skip(f"sample image missing: {path}")
-    return path
+
+    def lookup(name: str) -> Path:
+        path = root / "data" / name
+        if not path.exists():  # pragma: no cover - the sdist ships no samples
+            pytest.skip(f"sample image missing: {path}")
+        return path
+
+    return lookup
+
+
+@pytest.fixture
+def sample_npy(sample: Sample) -> Path:
+    """The 400x400 sample as a `.npy`, written by numpy from Pillow's array."""
+    return sample("earth.npy")
+
+
+@pytest.fixture
+def sample_pam(sample: Sample) -> Path:
+    """The 400x400 sample pixmap checked in as a PAM."""
+    return sample("earth.pam")
+
+
+@pytest.fixture
+def sample_tiff(sample: Sample) -> Path:
+    """The 400x400 sample pixmap checked in as an uncompressed TIFF."""
+    return sample("earth.tiff")
+
+
+@pytest.fixture
+def sample_bmp(sample: Sample) -> Path:
+    """The 400x400 sample bitmap checked into the repository."""
+    return sample("image.bmp")
+
+
+@pytest.fixture
+def sample_ppm(sample: Sample) -> Path:
+    """The 400x400 sample pixmap checked into the repository."""
+    return sample("earth.ppm")

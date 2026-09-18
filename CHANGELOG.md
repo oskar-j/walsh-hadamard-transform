@@ -9,6 +9,32 @@ The `## [x.y.z]` headings are load-bearing: the release workflow extracts the
 section matching the version in `pyproject.toml` and uses it as the GitHub
 Release notes.
 
+## [0.4.19]
+
+### Changed
+
+- **The tests find the repository through pytest's configuration, not by
+  counting folders.** `tests/conftest.py` computed the root as
+  `Path(__file__).resolve().parent.parent`, which is correct only for as long
+  as that file stays exactly one folder deep, and `test_readme_toc.py` counted
+  `parents[2]` on its own; moving the tests into folders in 0.4.16 had already
+  broken four such counts. The root is now pytest's own rootdir, which pytest
+  anchors at the `pyproject.toml` holding `[tool.pytest.ini_options]` from any
+  working directory and for a test at any depth. Two session fixtures hand it
+  out: `root`, and `sample`, which looks up a file in `data/` by name and skips
+  when the sdist has not shipped it. The module-level `ROOT` and `DATA_DIR`
+  are gone, and with them the two copies of the sample lookup.
+- A rootdir that is not the repository (a `--rootdir` or `-c` override, or the
+  pytest table leaving `pyproject.toml`) is an error naming the folder. The
+  check matters because the alternative is quiet: every test that needs a
+  sample would skip, and the golden tests would pass by not running.
+- `python tests/project/test_readme_toc.py` takes the README from the working
+  directory, or from a path given as its argument. A script has no pytest
+  configuration to ask, and every documented command already runs from the
+  repository root.
+
+No change to the package: the wheel differs from 0.4.18 in its version only.
+
 ## [0.4.18]
 
 ### Added
