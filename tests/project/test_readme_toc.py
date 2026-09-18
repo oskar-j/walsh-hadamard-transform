@@ -1,21 +1,24 @@
 """The README's table of contents is generated from its headings, and checked.
 
 A hand-kept list of links goes stale the first time a heading is renamed, and
-a dead anchor fails silently on GitHub. Regenerate the block with::
+a dead anchor fails silently on GitHub. Regenerate the block, from the
+repository root, with::
 
     python tests/project/test_readme_toc.py
+
+As a script this has no pytest configuration to ask for the root, so it takes
+the README from the working directory, or from a path given as its argument.
 """
 
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 
 import pytest
 
-# Counted from this file rather than taken from conftest, because this module
-# is also run as a script, where conftest is not importable.
-README = Path(__file__).resolve().parents[2] / "README.md"
+README = "README.md"
 BEGIN, END = "<!-- toc -->", "<!-- /toc -->"
 TOC_HEADING = "Contents"
 
@@ -54,10 +57,11 @@ def current_toc(text: str) -> str:
     return text[text.index(BEGIN) : text.index(END) + len(END)]
 
 
-def test_the_table_of_contents_matches_the_headings() -> None:
-    if not README.exists():  # pragma: no cover - a distribution without the README
+def test_the_table_of_contents_matches_the_headings(root: Path) -> None:
+    readme = root / README
+    if not readme.exists():  # pragma: no cover - a distribution without the README
         pytest.skip("README.md missing")
-    text = README.read_text(encoding="utf-8")
+    text = readme.read_text(encoding="utf-8")
     assert current_toc(text) == build_toc(text), (
         "README.md headings changed: run `python tests/project/test_readme_toc.py` to regenerate"
     )
@@ -77,6 +81,7 @@ def test_headings_inside_code_fences_are_not_headings() -> None:
 
 
 if __name__ == "__main__":  # pragma: no cover
-    source = README.read_text(encoding="utf-8")
-    README.write_text(source.replace(current_toc(source), build_toc(source)), encoding="utf-8")
-    print("README.md table of contents regenerated")
+    readme = Path(sys.argv[1] if len(sys.argv) > 1 else README)
+    source = readme.read_text(encoding="utf-8")
+    readme.write_text(source.replace(current_toc(source), build_toc(source)), encoding="utf-8")
+    print(f"{readme} table of contents regenerated")

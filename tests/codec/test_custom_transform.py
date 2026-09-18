@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 from click.testing import CliRunner
 
-from conftest import ROOT, write_ppm
+from conftest import write_ppm
 from walsh import (
     DiscreteCosineTransform,
     HaarTransform,
@@ -25,7 +25,6 @@ from walsh.cli import main
 from walsh.transforms import Block, remove_small_coefficients
 
 HEADER = 26
-EXAMPLE = ROOT / "examples" / "compare_transforms.py"
 
 
 def _dct_matrix(edge: int) -> Block:
@@ -293,10 +292,11 @@ def test_the_command_line_does_not_offer_a_transform() -> None:
         assert "--transform" not in result.output
 
 
-def _load_example() -> ModuleType:
-    if not EXAMPLE.exists():  # pragma: no cover - a distribution without examples
-        pytest.skip(f"example missing: {EXAMPLE}")
-    spec = importlib.util.spec_from_file_location("compare_transforms", EXAMPLE)
+def _load_example(root: Path) -> ModuleType:
+    path = root / "examples" / "compare_transforms.py"
+    if not path.exists():  # pragma: no cover - a distribution without examples
+        pytest.skip(f"example missing: {path}")
+    spec = importlib.util.spec_from_file_location("compare_transforms", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
@@ -305,9 +305,12 @@ def _load_example() -> ModuleType:
 
 
 def test_the_comparison_example_runs_and_its_transforms_are_orthonormal(
-    picture: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    root: Path,
+    picture: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    example = _load_example()
+    example = _load_example(root)
     for edge in (8, 16):
         m = example.HartleyTransform().matrix(edge)
         np.testing.assert_allclose(m @ m.T, np.eye(edge), atol=1e-12)

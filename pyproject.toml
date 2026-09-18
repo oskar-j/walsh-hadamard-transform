@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "walsh"
-version = "0.4.18"
+version = "0.4.19"
 description = "Image compression with the Walsh-Hadamard transform"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -62,6 +62,9 @@ where = ["src"]
 walsh = ["py.typed"]
 
 [tool.pytest.ini_options]
+# This table is also what anchors pytest's rootdir to this folder, and the
+# rootdir is where the tests find the repository: the `root` and `sample`
+# fixtures in tests/conftest.py read it, so no test counts folders upwards.
 testpaths = ["tests"]
 # Test modules sit in subfolders mirroring src/walsh and import shared helpers
 # as `from conftest import ...`; this keeps tests/ importable from any depth.
