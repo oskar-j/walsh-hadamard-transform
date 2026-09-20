@@ -134,6 +134,11 @@ def test_builder_methods_return_self() -> None:
     assert codec.with_input_size(4, 4) is codec
 
 
+def test_codec_rejects_nan_coefficient_threshold() -> None:
+    with pytest.raises(ValueError, match="non-negative"):
+        Codec().with_coeff_removal(float("nan"))
+
+
 def test_bmp_and_ppm_sources_compress_identically(tmp_path: Path) -> None:
     """The shared RGB contract means the source format cannot change the result."""
     from conftest import gradient_pixels, write_bmp, write_ppm

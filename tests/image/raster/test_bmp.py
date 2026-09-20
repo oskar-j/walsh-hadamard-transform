@@ -112,6 +112,22 @@ def test_bmp_rejects_truncated_pixel_data(tmp_path: Path) -> None:
         BMPImage().load(str(truncated))
 
 
+@pytest.mark.parametrize("offset", [0, 20])
+def test_bmp_rejects_pixel_offsets_inside_the_header(tmp_path: Path, offset: int) -> None:
+    source = write_bmp(tmp_path / "source.bmp", 2, 2, gradient_pixels(2, 2))
+    malformed = bytearray(source.read_bytes())
+    struct.pack_into("<I", malformed, 10, offset)
+    path = tmp_path / f"offset-{offset}.bmp"
+    path.write_bytes(malformed)
+
+    with pytest.raises(UnsupportedFileFormatError) as error:
+        BMPImage().load(str(path))
+
+    message = str(error.value)
+    assert f"pixel offset {offset}" in message
+    assert "info header size 40" in message
+
+
 @pytest.mark.parametrize(("width", "height"), [(0, 4), (4, 0), (0, 0), (-4, 4)])
 def test_bmp_rejects_non_positive_dimensions(tmp_path: Path, width: int, height: int) -> None:
     """Zero is the dangerous one, not the negative one.

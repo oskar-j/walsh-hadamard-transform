@@ -161,8 +161,12 @@ def test_a_destination_that_cannot_be_replaced_is_written_directly(tmp_path: Pat
 
 def test_writing_into_a_missing_directory_still_raises_oserror(tmp_path: Path) -> None:
     """The staging file cannot be created either, and the error must not change kind."""
-    with pytest.raises(OSError), open_binary_write(str(tmp_path / "nope" / "out.bin")):
+    destination = str(tmp_path / "nope" / "out.bin")
+    with pytest.raises(OSError) as error, open_binary_write(destination):
         pass  # pragma: no cover - the context manager raises on entry
+
+    assert error.value.filename == destination
+    assert "out.bin" in str(error.value)
 
 
 def test_align_rounds_up() -> None:

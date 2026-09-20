@@ -107,6 +107,13 @@ class BMPImage(RasterImage):
                 f"bpp={self._bpp} compression={self._compression}"
             )
 
+        header_end = 14 + self._header_size
+        if self._offset < header_end:
+            raise UnsupportedFileFormatError(
+                f"BMP pixel offset {self._offset} is before the header end at byte "
+                f"{header_end} (info header size {self._header_size})"
+            )
+
         # A negative height means the rows are already stored top-down.
         self._top_down = height < 0
         self._height = abs(height)
