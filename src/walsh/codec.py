@@ -1,17 +1,17 @@
 """Orchestration: the compress and extract pipelines.
 
-A :class:`Task` is told what to do by :meth:`Task.compress` or
-:meth:`Task.extract`, each naming its input and its output, and does it on
-:meth:`Task.run`::
+A :class:`Codec` is told what to do by :meth:`Codec.compress` or
+:meth:`Codec.extract`, each naming its input and its output, and does it on
+:meth:`Codec.run`::
 
-    Task().compress(input="photo.ppm", output="photo.cim").run()
-    Task().extract(input="photo.cim", output="restored.ppm").run()
+    Codec().compress(input="photo.ppm", output="photo.cim").run()
+    Codec().extract(input="photo.cim", output="restored.ppm").run()
 
 ``compress`` also accepts a picture as its output, which skips the ``.cim``
 file: the picture goes through the whole codec in memory and what is written
 is its lossy reconstruction, byte for byte what the two steps above produce::
 
-    Task().compress(input="photo.ppm", output="photo_compressed.ppm").run()
+    Codec().compress(input="photo.ppm", output="photo_compressed.ppm").run()
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ from walsh.transforms import (
     transform_for,
 )
 
-__all__ = ["Action", "Task"]
+__all__ = ["Action", "Codec"]
 
 log = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ DEFAULT_CHROMA_BLOCK_SIZE = 16
 DEFAULT_PACKED_BLOCK_SIZE = 4
 
 #: Where writing a different file type from the one read is tracked. Until it
-#: is done, :meth:`Task.compress` refuses it and points here.
+#: is done, :meth:`Codec.compress` refuses it and points here.
 CROSS_FORMAT_ISSUE = "https://github.com/oskar-j/walsh-hadamard-transform/issues/51"
 
 #: Neutral fill values used when a channel carries no blocks.
@@ -66,17 +66,17 @@ NEUTRAL_CHROMA = 128
 
 
 class Action(str, Enum):
-    """What a :class:`Task` should do when run."""
+    """What a :class:`Codec` should do when run."""
 
     COMPRESS = "compress"
     EXTRACT = "extract"
 
 
-class Task:
+class Codec:
     """A single compress or extract run, configured fluently.
 
-    >>> Task().compress(input="in.bmp", output="out.cim").run()  # doctest: +SKIP
-    >>> Task().extract(input="out.cim", output="back.bmp").run()  # doctest: +SKIP
+    >>> Codec().compress(input="in.bmp", output="out.cim").run()  # doctest: +SKIP
+    >>> Codec().extract(input="out.cim", output="back.bmp").run()  # doctest: +SKIP
 
     :param y_block_size: block edge used for the luma channel.
     :param cb_block_size: block edge used for the Cb channel.
@@ -96,7 +96,7 @@ class Task:
         packed_block_size: int = DEFAULT_PACKED_BLOCK_SIZE,
         transform: Transform | str | None = None,
     ) -> None:
-        """Create an unconfigured task with the default block geometry.
+        """Create an unconfigured codec with the default block geometry.
 
         Args:
             y_block_size: Block edge used for the luma channel.
@@ -116,7 +116,7 @@ class Task:
                 transforms and nothing else. **The ``.cim`` does not record
                 which transform wrote it.** A file written with anything but
                 the default is a ``.cim`` in name only: it must be extracted
-                by a ``Task`` given the same transform, and the ``walsh``
+                by a ``Codec`` given the same transform, and the ``walsh``
                 command, which never takes one, will decode it without
                 complaint into the wrong picture.
 
@@ -205,7 +205,7 @@ class Task:
 
     # -- configuration ---------------------------------------------------
 
-    def compress(self, input: FileSource, output: FileSource) -> Task:
+    def compress(self, input: FileSource, output: FileSource) -> Codec:
         """Plan a compression of ``input``; :meth:`run` carries it out.
 
         What is written depends on what ``output`` is named. A picture suffix
@@ -228,7 +228,7 @@ class Task:
                 container to stdout.
 
         Returns:
-            This task, so calls can be chained.
+            This codec, so calls can be chained.
 
         Raises:
             NotImplementedError: If ``output`` is a picture of a different
@@ -252,7 +252,7 @@ class Task:
         self._action, self._input, self._output = Action.COMPRESS, input, output
         return self
 
-    def extract(self, input: FileSource, output: FileSource) -> Task:
+    def extract(self, input: FileSource, output: FileSource) -> Codec:
         """Plan the restoring of a picture from a ``.cim``; :meth:`run` does it.
 
         Args:
@@ -263,7 +263,7 @@ class Task:
                 a BMP to stdout.
 
         Returns:
-            This task, so calls can be chained.
+            This codec, so calls can be chained.
         """
         self._action, self._input, self._output = Action.EXTRACT, input, output
         return self
@@ -283,7 +283,7 @@ class Task:
         """
         return destination is not None and Path(destination).suffix.lower() in SUFFIXES
 
-    def with_input_size(self, width: int | None, height: int | None) -> Task:
+    def with_input_size(self, width: int | None, height: int | None) -> Codec:
         """Declare how large the input picture is, for input that cannot say.
 
         Needed by exactly one kind of input: a pickled flat list of pixels,
@@ -298,7 +298,7 @@ class Task:
                 neither; two ``None`` clear a previous declaration.
 
         Returns:
-            This task, so calls can be chained.
+            This codec, so calls can be chained.
 
         Raises:
             ValueError: If only one is given, or either is not a positive
@@ -315,7 +315,7 @@ class Task:
         self._input_size = (width, height)
         return self
 
-    def with_coeff_removal(self, coeff: float | None) -> Task:
+    def with_coeff_removal(self, coeff: float | None) -> Codec:
         """Enable the second, independent lossy knob.
 
         Args:
@@ -324,14 +324,14 @@ class Task:
                 coefficient exactly equal to ``coeff`` is kept. It acts on the
                 *spectrum* of each block, never on the Hadamard matrix, whose
                 entries all share one magnitude; see
-                :func:`~walsh.transforms.remove_small_coefficients`. The task
+                :func:`~walsh.transforms.remove_small_coefficients`. The codec
                 applies it to the output of whichever transform it was given,
                 so it works the same for a custom one. The value is absolute,
                 so its effect scales with the block size, and it is consumed
                 only by :meth:`compress`: :meth:`extract` never thresholds.
 
         Returns:
-            This task, so calls can be chained.
+            This codec, so calls can be chained.
 
         Raises:
             ValueError: If ``coeff`` is negative. It is compared against a
@@ -581,7 +581,7 @@ class Task:
         # Each channel is one stack and the transform takes a stack as it is:
         # no list of blocks is built, re-stacked or split anywhere in between.
         # Coefficient removal is applied here rather than by the transform, so
-        # it works for whichever transform the task was given.
+        # it works for whichever transform the codec was given.
         spectral: dict[str, Block] = {}
         for channel, channel_blocks in blocks.items():
             spectrum = self._same_shape(
@@ -683,7 +683,7 @@ class Task:
         log.info("extracting %s -> %s", self._input, self._output)
         self._decode(CustomizableImage.load(self._input))
 
-    _ACTIONS: ClassVar[dict[Action, Callable[[Task], None]]] = {
+    _ACTIONS: ClassVar[dict[Action, Callable[[Codec], None]]] = {
         Action.COMPRESS: _compress,
         Action.EXTRACT: _extract,
     }
@@ -708,4 +708,4 @@ class Task:
             self._coeff_removal,
             type(self._transform).__name__,
         )
-        Task._ACTIONS[self._action](self)
+        Codec._ACTIONS[self._action](self)

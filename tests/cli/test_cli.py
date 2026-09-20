@@ -29,7 +29,7 @@ def test_compress_and_extract_via_cli(
 
 
 def test_missing_input_is_a_usage_error(runner: CliRunner, tmp_path: Path) -> None:
-    """click.Path(exists=True) rejects it before the task ever runs."""
+    """click.Path(exists=True) rejects it before the codec ever runs."""
     result = runner.invoke(
         main, ["compress", str(tmp_path / "nope.bmp"), str(tmp_path / "out.cim")]
     )

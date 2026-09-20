@@ -9,13 +9,13 @@ from pathlib import Path
 
 import click
 
-from walsh.exceptions import EXPECTED_ERRORS
-from walsh.task import (
+from walsh.codec import (
     DEFAULT_CHROMA_BLOCK_SIZE,
     DEFAULT_PACKED_BLOCK_SIZE,
     DEFAULT_Y_BLOCK_SIZE,
-    Task,
+    Codec,
 )
+from walsh.exceptions import EXPECTED_ERRORS
 
 __all__ = ["main"]
 
@@ -62,20 +62,20 @@ def _reject_writing_over_the_input(input_path: str, output_path: str) -> None:
         )
 
 
-def _run(configure: Callable[[], Task]) -> None:
-    """Build and run a task, turning expected failures into a clean CLI error.
+def _run(configure: Callable[[], Codec]) -> None:
+    """Build and run a codec, turning expected failures into a clean CLI error.
 
-    The task is built inside the guarded region, not passed in ready-made:
-    ``Task.__init__`` validates the block geometry (0.4.11, #21) and raises
+    The codec is built inside the guarded region, not passed in ready-made:
+    ``Codec.__init__`` validates the block geometry (0.4.11, #21) and raises
     ``ValueError`` for an edge that is not a power of two, one above the
     container's ceiling, or a packed size the reader would refuse, and that
     must surface as an ``Error:`` line rather than a traceback.
 
     Args:
-        configure: Returns the fully configured task.
+        configure: Returns the fully configured codec.
 
     Raises:
-        click.ClickException: If building or running the task fails for a
+        click.ClickException: If building or running the codec fails for a
             reason the user can act on, such as bad block sizes, a missing
             or malformed input file, or a conversion not implemented yet.
     """
@@ -206,7 +206,7 @@ def compress(
         raise click.UsageError("--width and --height must be given together")
     _run(
         lambda: (
-            Task(
+            Codec(
                 y_block_size=y_block_size,
                 cb_block_size=chroma_block_size,
                 cr_block_size=chroma_block_size,
@@ -239,7 +239,7 @@ def extract(input_path: str, output_path: str) -> None:
         click.UsageError: If OUTPUT names the same file as INPUT.
     """
     _reject_writing_over_the_input(input_path, output_path)
-    _run(lambda: Task().extract(input=input_path, output=output_path))
+    _run(lambda: Codec().extract(input=input_path, output=output_path))
 
 
 if __name__ == "__main__":  # pragma: no cover

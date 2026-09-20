@@ -217,7 +217,7 @@ def test_cim_saves_a_channel_with_no_blocks_as_nothing(tmp_path: Path) -> None:
 
 
 def test_set_descriptions_rejects_a_block_count_the_field_cannot_hold() -> None:
-    """The backstop for callers building a container directly rather than via Task.
+    """The backstop for callers building a container directly rather than via Codec.
 
     Without it the overflow surfaced from struct.pack during save(), naming
     neither the channel nor the limit.
@@ -264,7 +264,7 @@ def test_every_shipped_encoder_configuration_still_loads(tmp_path: Path) -> None
     encoder can produce: padded dimensions, every packed size, and odd block
     combinations, not just the defaults."""
     from conftest import gradient_pixels, write_ppm
-    from walsh.task import Task
+    from walsh.codec import Codec
 
     width, height = 13, 7  # a multiple of neither block size
     source = write_ppm(tmp_path / "odd.ppm", width, height, gradient_pixels(width, height))
@@ -277,7 +277,7 @@ def test_every_shipped_encoder_configuration_still_loads(tmp_path: Path) -> None
     ]
     for index, kwargs in enumerate(configurations):
         output = tmp_path / f"{index}.cim"
-        Task(**kwargs).compress(input=str(source), output=str(output)).run()
+        Codec(**kwargs).compress(input=str(source), output=str(output)).run()
         image = CustomizableImage.load(str(output))
         assert image.get_dimensions() == (width, height), kwargs
         assert len(image.get_y_data()) > 0, kwargs
@@ -313,7 +313,7 @@ def test_get_stack_of_an_empty_channel_has_zero_length() -> None:
 
 
 def test_set_data_accepts_a_stack_as_well_as_a_list(tmp_path: Path) -> None:
-    """Task hands over one (count, edge, edge) array; direct callers a list."""
+    """Codec hands over one (count, edge, edge) array; direct callers a list."""
     description = BlockDescription(4, 2, 2)
     stack = np.arange(2 * 4 * 4, dtype=float).reshape(2, 4, 4)
     as_array, as_list = CustomizableImage(), CustomizableImage()
@@ -353,7 +353,7 @@ def test_saving_without_block_descriptions_is_an_error(tmp_path: Path) -> None:
 
 def test_the_container_in_memory_is_the_container_on_disk(tmp_path: Path) -> None:
     """`to_bytes` is what `save` writes and `from_bytes` reads what `load`
-    reads, which is what lets Task skip the file without changing a pixel."""
+    reads, which is what lets Codec skip the file without changing a pixel."""
     image = CustomizableImage()
     image.set_dimensions(16, 8)
     image.set_descriptions(

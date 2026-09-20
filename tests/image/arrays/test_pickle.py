@@ -12,7 +12,7 @@ import pytest
 from click.testing import CliRunner
 
 from conftest import gradient_pixels
-from walsh import PickleImage, Task
+from walsh import Codec, PickleImage
 from walsh.cli import main
 from walsh.exceptions import UnsupportedFileFormatError
 from walsh.image import PICKLE_PROTOCOL, pixels_from_object, reader_for, safe_loads
@@ -410,7 +410,7 @@ def test_the_suffixes_select_the_pickle_reader(name: str) -> None:
     assert isinstance(reader_for(name), PickleImage)
 
 
-# --- the declared size, through Task and the command line ---------------------
+# --- the declared size, through Codec and the command line ---------------------
 
 
 def test_every_form_compresses_to_the_same_cim_as_the_ppm(
@@ -419,7 +419,7 @@ def test_every_form_compresses_to_the_same_cim_as_the_ppm(
     from conftest import write_ppm
 
     source = write_ppm(tmp_path / "g.ppm", WIDTH, HEIGHT, gradient_pixels(WIDTH, HEIGHT))
-    Task().compress(input=str(source), output=str(tmp_path / "ref.cim")).run()
+    Codec().compress(input=str(source), output=str(tmp_path / "ref.cim")).run()
     reference = (tmp_path / "ref.cim").read_bytes()
 
     forms: list[tuple[object, tuple[int | None, int | None]]] = [
@@ -431,14 +431,14 @@ def test_every_form_compresses_to_the_same_cim_as_the_ppm(
     for index, (value, size) in enumerate(forms):
         path = _dump(tmp_path / f"{index}.pkl", value)
         out = tmp_path / f"{index}.cim"
-        Task().with_input_size(*size).compress(input=str(path), output=str(out)).run()
+        Codec().with_input_size(*size).compress(input=str(path), output=str(out)).run()
         assert out.read_bytes() == reference
 
 
 def test_extract_writes_a_pickle_that_round_trips(gradient_ppm: Path, tmp_path: Path) -> None:
-    Task().compress(input=str(gradient_ppm), output=str(tmp_path / "g.cim")).run()
+    Codec().compress(input=str(gradient_ppm), output=str(tmp_path / "g.cim")).run()
     for target in ("back.pkl", "back.ppm"):
-        Task().extract(input=str(tmp_path / "g.cim"), output=str(tmp_path / target)).run()
+        Codec().extract(input=str(tmp_path / "g.cim"), output=str(tmp_path / target)).run()
     via_pickle, via_ppm = reader_for("x.pkl"), reader_for("x.ppm")
     via_pickle.load(str(tmp_path / "back.pkl"))
     via_ppm.load(str(tmp_path / "back.ppm"))
@@ -458,34 +458,34 @@ def test_extract_writes_a_pickle_that_round_trips(gradient_ppm: Path, tmp_path: 
 )
 def test_with_input_size_validates_when_it_is_set(width: Any, height: Any, match: str) -> None:
     with pytest.raises(ValueError, match=match):
-        Task().with_input_size(width, height)
+        Codec().with_input_size(width, height)
 
 
 def test_with_input_size_chains_and_two_nones_clear_it(
     expected: np.ndarray, tmp_path: Path
 ) -> None:
-    task = Task()
-    assert task.with_input_size(3, 3) is task
-    assert task.with_input_size(None, None) is task
+    codec = Codec()
+    assert codec.with_input_size(3, 3) is codec
+    assert codec.with_input_size(None, None) is codec
     path = _dump(tmp_path / "rows.pkl", _rows(expected))
-    task.compress(input=str(path), output=str(tmp_path / "o.cim")).run()
+    codec.compress(input=str(path), output=str(tmp_path / "o.cim")).run()
 
 
 def test_a_declared_size_is_verified_for_a_format_that_has_its_own(
     gradient_ppm: Path, tmp_path: Path
 ) -> None:
     out = tmp_path / "o.cim"
-    Task().with_input_size(16, 16).compress(input=str(gradient_ppm), output=str(out)).run()
+    Codec().with_input_size(16, 16).compress(input=str(gradient_ppm), output=str(out)).run()
     out.unlink()
     with pytest.raises(ValueError, match=r"gradient\.ppm is 16x16, not the 8x32 declared"):
-        Task().with_input_size(8, 32).compress(input=str(gradient_ppm), output=str(out)).run()
+        Codec().with_input_size(8, 32).compress(input=str(gradient_ppm), output=str(out)).run()
     assert not out.exists()
 
 
 def test_an_input_size_means_nothing_to_extract(gradient_ppm: Path, tmp_path: Path) -> None:
-    Task().compress(input=str(gradient_ppm), output=str(tmp_path / "g.cim")).run()
+    Codec().compress(input=str(gradient_ppm), output=str(tmp_path / "g.cim")).run()
     with pytest.raises(ValueError, match="applies to compress only"):
-        Task().with_input_size(16, 16).extract(
+        Codec().with_input_size(16, 16).extract(
             input=str(tmp_path / "g.cim"), output=str(tmp_path / "b.ppm")
         ).run()
     assert not (tmp_path / "b.ppm").exists()

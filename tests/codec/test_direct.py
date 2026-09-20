@@ -1,6 +1,6 @@
-"""`Task.compress` with a picture as its output: the codec without the `.cim` file.
+"""`Codec.compress` with a picture as its output: the codec without the `.cim` file.
 
-    Task().compress(input="earth.ppm", output="earth_compressed.ppm").run()
+    Codec().compress(input="earth.ppm", output="earth_compressed.ppm").run()
 
 What is written is the picture's lossy reconstruction, and the claim these
 tests hold it to is that it is exactly what compressing to a `.cim` and
@@ -26,8 +26,8 @@ from conftest import (
     write_ppm,
     write_tiff,
 )
-from walsh import Task, UnsupportedFileFormatError, reader_for
-from walsh.task import CROSS_FORMAT_ISSUE
+from walsh import Codec, UnsupportedFileFormatError, reader_for
+from walsh.codec import CROSS_FORMAT_ISSUE
 
 WIDTH, HEIGHT = 40, 24
 
@@ -69,11 +69,11 @@ def _pixels(path: Path) -> np.ndarray:
     return image.get_array()
 
 
-def _two_steps(task: Callable[[], Task], source: Path, target: Path) -> Path:
+def _two_steps(codec: Callable[[], Codec], source: Path, target: Path) -> Path:
     """The route the direct one must match: a .cim on disk in between."""
     container = target.with_suffix(".cim")
-    task().compress(input=str(source), output=str(container)).run()
-    task().extract(input=str(container), output=str(target)).run()
+    codec().compress(input=str(source), output=str(container)).run()
+    codec().extract(input=str(container), output=str(target)).run()
     return target
 
 
@@ -86,9 +86,9 @@ def test_the_direct_output_is_what_compress_then_extract_writes(
 ) -> None:
     source = _source(tmp_path, suffix)
     direct = tmp_path / f"direct{suffix}"
-    Task().compress(input=str(source), output=str(direct)).run()
+    Codec().compress(input=str(source), output=str(direct)).run()
 
-    expected = _two_steps(Task, source, tmp_path / f"expected{suffix}")
+    expected = _two_steps(Codec, source, tmp_path / f"expected{suffix}")
     assert np.array_equal(_pixels(direct), _pixels(expected))
     if suffix != ".png":  # a PNG is pinned by its pixels; see test_png.py
         assert direct.read_bytes() == expected.read_bytes()
@@ -99,7 +99,7 @@ def test_the_output_is_a_lossy_picture_and_not_the_compressed_data(tmp_path: Pat
     size and dimensions, close to the input and not equal to it."""
     source = _source(tmp_path, ".ppm")
     direct = tmp_path / "direct.ppm"
-    Task().compress(input=str(source), output=str(direct)).run()
+    Codec().compress(input=str(source), output=str(direct)).run()
 
     before, after = _pixels(source).astype(int), _pixels(direct).astype(int)
     assert direct.stat().st_size == source.stat().st_size
@@ -112,7 +112,7 @@ def test_nothing_but_the_output_is_written(tmp_path: Path) -> None:
     source = _source(tmp_path, ".ppm")
     out = tmp_path / "out"
     out.mkdir()
-    Task().compress(input=str(source), output=str(out / "direct.ppm")).run()
+    Codec().compress(input=str(source), output=str(out / "direct.ppm")).run()
     assert sorted(path.name for path in out.iterdir()) == ["direct.ppm"]
     assert sorted(path.name for path in tmp_path.iterdir()) == ["out", "source.ppm"]
 
@@ -120,16 +120,16 @@ def test_nothing_but_the_output_is_written(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "configure",
     [
-        lambda: Task(packed_block_size=2),
-        lambda: Task(y_block_size=16, cb_block_size=32, cr_block_size=32, packed_block_size=6),
-        lambda: Task().with_coeff_removal(40.0),
-        lambda: Task(transform="dct"),
-        lambda: Task(transform="haar", packed_block_size=3).with_coeff_removal(5.0),
+        lambda: Codec(packed_block_size=2),
+        lambda: Codec(y_block_size=16, cb_block_size=32, cr_block_size=32, packed_block_size=6),
+        lambda: Codec().with_coeff_removal(40.0),
+        lambda: Codec(transform="dct"),
+        lambda: Codec(transform="haar", packed_block_size=3).with_coeff_removal(5.0),
     ],
     ids=["packed-2", "larger-blocks", "coefficient-removal", "dct", "haar-packed-3-removal"],
 )
 def test_every_setting_reaches_the_direct_route(
-    tmp_path: Path, configure: Callable[[], Task]
+    tmp_path: Path, configure: Callable[[], Codec]
 ) -> None:
     """The DCT and Haar are not bit-exact across machines, but this compares
     two runs on one machine, which do the same arithmetic in the same order."""
@@ -141,7 +141,7 @@ def test_every_setting_reaches_the_direct_route(
     assert direct.read_bytes() == expected.read_bytes()
 
     default = tmp_path / "default.ppm"
-    Task().compress(input=str(source), output=str(default)).run()
+    Codec().compress(input=str(source), output=str(default)).run()
     assert direct.read_bytes() != default.read_bytes(), "the setting changed nothing"
 
 
@@ -152,11 +152,11 @@ def test_a_declared_size_is_honoured_and_verified(tmp_path: Path) -> None:
     flat.write_bytes(pickle.dumps(_picture(), protocol=4))
     direct = tmp_path / "direct.pkl"
 
-    Task().with_input_size(WIDTH, HEIGHT).compress(input=str(flat), output=str(direct)).run()
+    Codec().with_input_size(WIDTH, HEIGHT).compress(input=str(flat), output=str(direct)).run()
     assert _pixels(direct).shape == (HEIGHT, WIDTH, 3)
 
     with pytest.raises(ValueError, match=f"is {WIDTH}x{HEIGHT}, not the 10x96 declared"):
-        Task().with_input_size(10, 96).compress(
+        Codec().with_input_size(10, 96).compress(
             input=str(_source(tmp_path, ".ppm")), output=str(tmp_path / "wrong.ppm")
         ).run()
     assert not (tmp_path / "wrong.ppm").exists()
@@ -172,9 +172,9 @@ def test_a_declared_size_is_honoured_and_verified(tmp_path: Path) -> None:
 def test_another_file_type_is_not_implemented_yet(tmp_path: Path, source: str, target: str) -> None:
     path = _source(tmp_path, source)
     output = tmp_path / f"crossed{target}"
-    task = Task()
+    codec = Codec()
     with pytest.raises(NotImplementedError) as caught:
-        task.compress(input=str(path), output=str(output))
+        codec.compress(input=str(path), output=str(output))
 
     message = str(caught.value)
     assert "planned for 0.6.0" in message
@@ -184,14 +184,14 @@ def test_another_file_type_is_not_implemented_yet(tmp_path: Path, source: str, t
 
     assert not output.exists()
     with pytest.raises(ValueError, match="nothing to run"):
-        task.run()  # the refused call left the task as it was
+        codec.run()  # the refused call left the codec as it was
 
 
 def test_the_route_the_message_recommends_works(tmp_path: Path) -> None:
     source = _source(tmp_path, ".ppm")
-    crossed = _two_steps(Task, source, tmp_path / "crossed.png")
+    crossed = _two_steps(Codec, source, tmp_path / "crossed.png")
     same = tmp_path / "same.ppm"
-    Task().compress(input=str(source), output=str(same)).run()
+    Codec().compress(input=str(source), output=str(same)).run()
     assert np.array_equal(_pixels(crossed), _pixels(same))
 
 
@@ -205,20 +205,22 @@ def test_two_spellings_of_one_file_type_are_one_file_type(
     """The type is the reader class, so suffixes that share one do not cross."""
     path = _source(tmp_path, source)
     output = tmp_path / f"respelled{target}"
-    Task().compress(input=str(path), output=str(output)).run()
-    assert np.array_equal(_pixels(output), _pixels(_two_steps(Task, path, tmp_path / f"e{source}")))
+    Codec().compress(input=str(path), output=str(output)).run()
+    assert np.array_equal(
+        _pixels(output), _pixels(_two_steps(Codec, path, tmp_path / f"e{source}"))
+    )
 
 
 def test_standard_input_counts_as_a_bmp() -> None:
     """A stream has no suffix, and `reader_for(None)` has always meant BMP."""
-    Task().compress(input=None, output="fine.bmp")
+    Codec().compress(input=None, output="fine.bmp")
     with pytest.raises(NotImplementedError, match=r"planned for 0\.6\.0"):
-        Task().compress(input=None, output="crossed.ppm")
+        Codec().compress(input=None, output="crossed.ppm")
 
 
 def test_an_input_this_package_cannot_read_is_refused_when_the_output_is_a_picture() -> None:
     with pytest.raises(UnsupportedFileFormatError, match=r"unsupported image format '\.jpg'"):
-        Task().compress(input="photo.jpg", output="photo_compressed.ppm")
+        Codec().compress(input="photo.jpg", output="photo_compressed.ppm")
 
 
 # --- anything that is not a picture is still the container --------------------
@@ -228,10 +230,10 @@ def test_an_input_this_package_cannot_read_is_refused_when_the_output_is_a_pictu
 def test_any_other_output_name_gets_the_container(tmp_path: Path, name: str) -> None:
     source = _source(tmp_path, ".ppm")
     reference = tmp_path / "reference.cim"
-    Task().compress(input=str(source), output=str(reference)).run()
+    Codec().compress(input=str(source), output=str(reference)).run()
 
     output = tmp_path / name
-    Task().compress(input=str(source), output=str(output)).run()
+    Codec().compress(input=str(source), output=str(output)).run()
     assert output.read_bytes() == reference.read_bytes()
 
 
@@ -240,31 +242,31 @@ def test_the_container_still_goes_to_standard_output(
 ) -> None:
     source = _source(tmp_path, ".ppm")
     reference = tmp_path / "reference.cim"
-    Task().compress(input=str(source), output=str(reference)).run()
+    Codec().compress(input=str(source), output=str(reference)).run()
 
-    Task().compress(input=str(source), output=None).run()
+    Codec().compress(input=str(source), output=None).run()
     assert capfdbinary.readouterr().out == reference.read_bytes()
 
 
 def test_extract_takes_its_input_and_output_the_same_way(tmp_path: Path) -> None:
     source = _source(tmp_path, ".ppm")
     container = tmp_path / "c.cim"
-    Task().compress(str(source), str(container)).run()  # positionally, too
-    Task().extract(input=str(container), output=str(tmp_path / "back.png")).run()
+    Codec().compress(str(source), str(container)).run()  # positionally, too
+    Codec().extract(input=str(container), output=str(tmp_path / "back.png")).run()
     assert _pixels(tmp_path / "back.png").shape == (HEIGHT, WIDTH, 3)
 
 
 def test_a_path_object_is_as_good_as_a_string(tmp_path: Path) -> None:
     source = _source(tmp_path, ".ppm")
-    Task().compress(input=source, output=tmp_path / "direct.ppm").run()
+    Codec().compress(input=source, output=tmp_path / "direct.ppm").run()
     assert (tmp_path / "direct.ppm").stat().st_size == source.stat().st_size
 
 
-def test_one_task_can_be_told_to_do_something_else(tmp_path: Path) -> None:
+def test_one_codec_can_be_told_to_do_something_else(tmp_path: Path) -> None:
     """compress() and extract() replace the plan; the settings stay."""
     source = _source(tmp_path, ".ppm")
-    task = Task(packed_block_size=2)
-    task.compress(input=str(source), output=str(tmp_path / "a.cim")).run()
-    task.extract(input=str(tmp_path / "a.cim"), output=str(tmp_path / "a.ppm")).run()
-    task.compress(input=str(source), output=str(tmp_path / "b.ppm")).run()
+    codec = Codec(packed_block_size=2)
+    codec.compress(input=str(source), output=str(tmp_path / "a.cim")).run()
+    codec.extract(input=str(tmp_path / "a.cim"), output=str(tmp_path / "a.ppm")).run()
+    codec.compress(input=str(source), output=str(tmp_path / "b.ppm")).run()
     assert (tmp_path / "a.ppm").read_bytes() == (tmp_path / "b.ppm").read_bytes()

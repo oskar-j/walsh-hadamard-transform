@@ -21,7 +21,7 @@ __all__ = [
 ]
 
 #: Where an image is read from or written to. ``None`` means ``sys.stdin`` or
-#: ``sys.stdout``. That is a library affordance -- ``Task().extract(None, None)``,
+#: ``sys.stdout``. That is a library affordance -- ``Codec().extract(None, None)``,
 #: ``reader_for(None)`` -- and not reachable from the CLI, whose arguments are
 #: paths. On the read side it also needs a **seekable** stdin for BMP, TIFF and
 #: ASCII PPM, which seek while parsing; a ``< file`` redirect provides one, a

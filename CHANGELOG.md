@@ -13,23 +13,29 @@ Release notes.
 
 ### Changed
 
-- **`Task` names its input and output in one call, and this is a breaking
-  change.** `compress(input=, output=)` and `extract(input=, output=)` replace
-  the three-call builder:
+- **`Task` is now `Codec`, and it names its input and output in one call.
+  Both are breaking changes, made together so that callers change once.**
+  The class compresses and extracts, which is what a codec is, and the
+  documentation had called it "the codec" all along. `compress(input=,
+  output=)` and `extract(input=, output=)` replace the three-call builder:
 
   | Up to 0.5.0 | From 0.5.1 |
   | --- | --- |
-  | `Task().with_action("compress").with_input("a.ppm").with_output("a.cim").run()` | `Task().compress(input="a.ppm", output="a.cim").run()` |
-  | `Task().with_action("extract").with_input("a.cim").with_output("b.bmp").run()` | `Task().extract(input="a.cim", output="b.bmp").run()` |
+  | `from walsh import Task` | `from walsh import Codec` |
+  | `Task().with_action("compress").with_input("a.ppm").with_output("a.cim").run()` | `Codec().compress(input="a.ppm", output="a.cim").run()` |
+  | `Task().with_action("extract").with_input("a.cim").with_output("b.bmp").run()` | `Codec().extract(input="a.cim", output="b.bmp").run()` |
+  | `Task(transform="dct")`, `Task(packed_block_size=2)` | `Codec(transform="dct")`, `Codec(packed_block_size=2)` |
 
-  `with_action`, `with_input` and `with_output` are removed, not deprecated.
-  So are the old `Task.compress()` and `Task.extract()`, which took no
-  arguments and ran at once: the names now belong to the methods above, which
-  only plan, and `run()` still does the work. Calling either the old way is a
-  `TypeError` naming the missing arguments. `with_coeff_removal`,
-  `with_input_size`, the constructor and the `walsh` command are unchanged,
-  and both arguments may be given positionally. `run()` with nothing planned
-  now says `nothing to run; call compress() or extract() first`.
+  Nothing is left behind under the old names: `Task`, `with_action`,
+  `with_input` and `with_output` are removed, not deprecated, and the module
+  `walsh.task` is now `walsh.codec`. The old `compress()` and `extract()`
+  took no arguments and ran at once; the names now belong to the methods
+  above, which only plan, and `run()` still does the work. Calling either
+  the old way is a `TypeError` naming the missing arguments.
+  `with_coeff_removal`, `with_input_size`, the constructor's keywords, the
+  `Action` enum and the `walsh` command are unchanged, and both arguments may
+  be given positionally. `run()` with nothing planned now says `nothing to
+  run; call compress() or extract() first`.
 
 ### Added
 
@@ -38,7 +44,7 @@ Release notes.
   reconstruction is written:
 
   ```python
-  Task().compress(input="data/ppm/earth.ppm", output="earth_compressed.ppm").run()
+  Codec().compress(input="data/ppm/earth.ppm", output="earth_compressed.ppm").run()
   ```
 
   The file is a picture like any other and as large as the input: it shows

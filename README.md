@@ -275,34 +275,35 @@ usage error such as a missing file or an unknown option.
 ### As a library
 
 ```python
-from walsh import Task
+from walsh import Codec
 
-Task().compress(input="data/bmp/image.bmp", output="out.cim").run()
-Task().extract(input="out.cim", output="back.bmp").run()
+Codec().compress(input="data/bmp/image.bmp", output="out.cim").run()
+Codec().extract(input="out.cim", output="back.bmp").run()
 ```
 
 `compress` and `extract` say what to do and name the input and the output;
-nothing is read or written until `run()`. The settings go on the `Task`
+nothing is read or written until `run()`. The settings go on the `Codec`
 itself, in the constructor or chained before `run()`:
 
 ```python
-Task(packed_block_size=2).with_coeff_removal(40).compress(
+Codec(packed_block_size=2).with_coeff_removal(40).compress(
     input="photo.png", output="photo.cim"
 ).run()
 ```
 
-Up to 0.5.0 the same was spelled
-`Task().with_action("compress").with_input(...).with_output(...).run()`. Those
-three methods are gone, and so are the old argument-less `compress()` and
-`extract()`, which ran at once: each `with_action(A).with_input(X).with_output(Y)`
-becomes `A(input=X, output=Y)`.
+Up to 0.5.0 the class was called `Task` and the same was spelled
+`Task().with_action("compress").with_input(...).with_output(...).run()`. The
+old name and those three methods are gone, and so are the old argument-less
+`compress()` and `extract()`, which ran at once: `Task` becomes `Codec`, and
+each `with_action(A).with_input(X).with_output(Y)` becomes
+`A(input=X, output=Y)`.
 
 #### Skipping the `.cim` file
 
 Give `compress` a picture as its output and the `.cim` never reaches the disk:
 
 ```python
-Task().compress(input="data/ppm/earth.ppm", output="earth_compressed.ppm").run()
+Codec().compress(input="data/ppm/earth.ppm", output="earth_compressed.ppm").run()
 ```
 
 The picture goes through the whole codec in memory (colour conversion,
@@ -314,7 +315,7 @@ applies, so it is also the short way to compare settings or transforms:
 
 ```python
 for name in ("walsh", "dct", "haar"):
-    Task(transform=name).compress(input="earth.ppm", output=f"earth_{name}.ppm").run()
+    Codec(transform=name).compress(input="earth.ppm", output=f"earth_{name}.ppm").run()
 ```
 
 What decides is the output's suffix. A picture suffix (`.bmp`, `.png`, `.ppm`
@@ -327,15 +328,15 @@ reconstruction; anything else, `.cim` by convention, writes the container.
 then the two steps cross formats as they always have:
 
 ```python
-Task().compress(input="earth.ppm", output="earth.cim").run()
-Task().extract(input="earth.cim", output="earth.png").run()
+Codec().compress(input="earth.ppm", output="earth.cim").run()
+Codec().extract(input="earth.cim", output="earth.png").run()
 ```
 
 Suffixes that name one format, such as `.tif` and `.tiff`, are one type.
 
 #### Other transforms
 
-`Task` takes the block transform as a keyword, so another transform can reuse
+`Codec` takes the block transform as a keyword, so another transform can reuse
 the whole pipeline — the colour conversion, the padding, the crop to the
 low-frequency corner, the container — with only the transform swapped. Three
 ship with the package and are selected by name, in any case:
@@ -344,13 +345,13 @@ ship with the package and are selected by name, in any case:
 | --- | --- | --- |
 | `"walsh"` | Walsh-Hadamard, sequency ordered | The default, and what the `.cim` format and the `walsh` command mean. Exact arithmetic: byte-identical output on every platform. |
 | `"dct"` | DCT-II, the transform inside JPEG | Best quality per byte on natural pictures. |
-| `"haar"` | Haar wavelet | Block edges must be powers of two, which `Task` requires anyway. |
+| `"haar"` | Haar wavelet | Block edges must be powers of two, which `Codec` requires anyway. |
 
 ```python
-from walsh import Task
+from walsh import Codec
 
-Task(transform="dct").compress(input="data/ppm/earth.ppm", output="dct.cim").run()
-Task(transform="dct").extract(input="dct.cim", output="back.ppm").run()
+Codec(transform="dct").compress(input="data/ppm/earth.ppm", output="dct.cim").run()
+Codec(transform="dct").extract(input="dct.cim", output="back.ppm").run()
 ```
 
 An unknown name is a `ValueError` that lists the known ones. `"dct"` and
@@ -358,7 +359,7 @@ An unknown name is a `ValueError` that lists the known ones. `"dct"` and
 only `"walsh"` carries the bit-exactness guarantee.
 
 > **The `.cim` does not record which transform wrote it.** A file written with
-> anything but the default must be extracted by a `Task` given the same
+> anything but the default must be extracted by a `Codec` given the same
 > transform. The `walsh` command never takes one, and will decode such a file
 > without complaint into a degraded picture. This keyword is for experiments,
 > not for files you hand to someone else.
@@ -390,7 +391,7 @@ transform `MatrixTransform` needs only the matrix:
 
 ```python
 import numpy as np
-from walsh import MatrixTransform, Task
+from walsh import MatrixTransform, Codec
 
 
 class Hartley(MatrixTransform):
@@ -401,17 +402,17 @@ class Hartley(MatrixTransform):
         return (np.cos(angle) + np.sin(angle)) / np.sqrt(size)
 
 
-Task(transform=Hartley()).compress(input="data/ppm/earth.ppm", output="hartley.cim").run()
+Codec(transform=Hartley()).compress(input="data/ppm/earth.ppm", output="hartley.cim").run()
 ```
 
 It trails the others for an instructive reason: the codec keeps the top-left
 corner of each spectrum, which assumes rows rise in frequency, and a Hartley
 matrix puts half of its low frequencies in its *last* rows. A transform that
 is not a matrix product subclasses `Transform` directly and implements
-`transform` and `inverse_transform` for one square block; `Task` calls
+`transform` and `inverse_transform` for one square block; `Codec` calls
 `transform_stack` and `inverse_transform_stack`, whose defaults loop over the
 blocks, so override those when a whole `(count, edge, edge)` stack can go
-through in one operation. `with_coeff_removal` is applied by the task, so it
+through in one operation. `with_coeff_removal` is applied by the codec, so it
 works for any transform.
 
 ### Examples
@@ -564,7 +565,7 @@ What a `.pkl` or `.pickle` may hold:
 | A NumPy array | its shape | The `.npy` rules: `uint8`; `(h, w, 3)` RGB, `(h, w)` or `(h, w, 1)` greyscale, `(h, w, 4)` RGBA only when fully opaque. Every pickle protocol, and pickles written under NumPy 1 and NumPy 2 alike, whichever is installed. |
 | Rows of pixels, `[[(r, g, b), ...], ...]` | its structure | |
 | `{"width": w, "height": h, "pixels": [...]}` | the dict | Around a flat list, or around anything above, which must then agree. |
-| A flat list of pixels, `[(r, g, b), ...]` | `--width` and `--height`, or `Task.with_input_size(w, h)` | Top row first. It does not say how wide the picture is and nothing here guesses: 160,000 pixels could be 400x400 or 200x800. |
+| A flat list of pixels, `[(r, g, b), ...]` | `--width` and `--height`, or `Codec.with_input_size(w, h)` | Top row first. It does not say how wide the picture is and nothing here guesses: 160,000 pixels could be 400x400 or 200x800. |
 
 Lists and tuples are interchangeable at every level. Samples must be integers
 in 0-255, Python's or NumPy's; floats, booleans, out-of-range values and ragged
@@ -572,9 +573,9 @@ rows are refused by name. A declared size is never silently dropped: input that
 carries its own size, in any format, must match it.
 
 ```python
-from walsh import Task
+from walsh import Codec
 
-Task().with_input_size(400, 300).compress(input="pixels.pkl", output="out.cim").run()
+Codec().with_input_size(400, 300).compress(input="pixels.pkl", output="out.cim").run()
 ```
 
 An `object` array saved by `numpy.save`, which only

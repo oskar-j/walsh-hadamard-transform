@@ -47,11 +47,11 @@ class Transform(ABC):
     """A block transform and its inverse.
 
     Subclass this to run another transform through the codec's pipeline with
-    ``Task(transform=...)``: a DCT or a Haar transform at the same block
+    ``Codec(transform=...)``: a DCT or a Haar transform at the same block
     geometry, say, to compare against Walsh-Hadamard. Only :meth:`transform`
     and :meth:`inverse_transform` are required, and they see one square block
     at a time. :meth:`transform_stack` and :meth:`inverse_transform_stack` are
-    what :class:`~walsh.task.Task` actually calls, with every block of a
+    what :class:`~walsh.codec.Codec` actually calls, with every block of a
     channel at once; their defaults loop over the blocks, which is correct for
     any subclass and slow on a large image, so override them when the
     transform can take a whole ``(count, edge, edge)`` stack in one operation.
@@ -59,7 +59,7 @@ class Transform(ABC):
     Two things the ``.cim`` container asks of a transform. A block must come
     back the same shape it went in. And coefficients are stored rounded to
     ``int16``: an orthonormal transform of 8-bit samples cannot exceed
-    ``edge * 255``, which fits at every edge ``Task`` accepts, but a transform
+    ``edge * 255``, which fits at every edge ``Codec`` accepts, but a transform
     with a larger gain will saturate silently.
     """
 
@@ -440,7 +440,7 @@ def remove_small_coefficients(spectrum: Block, coeff: float) -> Block:
     """Zero every spectral coefficient whose magnitude is strictly below ``coeff``.
 
     The codec's second lossy knob, as one function so that
-    :class:`WalshHadamardTransform` and :class:`~walsh.task.Task`, which
+    :class:`WalshHadamardTransform` and :class:`~walsh.codec.Codec`, which
     applies it after whatever transform it was given, cannot drift apart.
 
     Args:

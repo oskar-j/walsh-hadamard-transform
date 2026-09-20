@@ -2,19 +2,20 @@
 
 Typical use::
 
-    from walsh import Task
+    from walsh import Codec
 
-    Task().compress(input="image.bmp", output="out.cim").run()
-    Task().extract(input="out.cim", output="back.bmp").run()
+    Codec().compress(input="image.bmp", output="out.cim").run()
+    Codec().extract(input="out.cim", output="back.bmp").run()
 
     # Or skip the .cim and write the lossy reconstruction directly:
-    Task().compress(input="image.bmp", output="image_compressed.bmp").run()
+    Codec().compress(input="image.bmp", output="image_compressed.bmp").run()
 """
 
 from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError, version
 
+from walsh.codec import Action, Codec
 from walsh.colors import ColorModel, RgbColorModel, YCbCrColorModel
 from walsh.exceptions import UnsupportedFileFormatError, WalshError
 from walsh.image import (
@@ -30,7 +31,6 @@ from walsh.image import (
     TIFFImage,
     reader_for,
 )
-from walsh.task import Action, Task
 from walsh.transforms import (
     DiscreteCosineTransform,
     HaarTransform,
@@ -49,6 +49,7 @@ __all__ = [
     "Action",
     "BMPImage",
     "BlockDescription",
+    "Codec",
     "ColorModel",
     "CustomizableImage",
     "DiscreteCosineTransform",
@@ -62,7 +63,6 @@ __all__ = [
     "RasterImage",
     "RgbColorModel",
     "TIFFImage",
-    "Task",
     "Transform",
     "UnsupportedFileFormatError",
     "WalshError",

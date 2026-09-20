@@ -167,7 +167,7 @@ class CustomizableImage:
            transform requires anyway;
         3. the packed size is at least 1 and no larger than the block;
         4. the block count is either 0, the "empty channel" state that
-           :meth:`~walsh.task.Task.extract` fills with a neutral value, or
+           :meth:`~walsh.codec.Codec.extract` fills with a neutral value, or
            exactly the count a plane of these dimensions is cut into.
 
         It runs after all three descriptions are read, so a file cut short in
@@ -268,7 +268,7 @@ class CustomizableImage:
     def from_bytes(cls, data: bytes) -> CustomizableImage:
         """Read a ``.cim`` held in memory, exactly as :meth:`load` reads a file.
 
-        With :meth:`to_bytes` this is how :class:`~walsh.task.Task` sends a
+        With :meth:`to_bytes` this is how :class:`~walsh.codec.Codec` sends a
         picture through the codec without an intermediate file: the decoder is
         handed the very bytes a file would have held, so the result cannot
         differ from a compress followed by an extract.
@@ -389,7 +389,7 @@ class CustomizableImage:
             ValueError: If a channel declares more blocks than the container's
                 16-bit count field can hold. Without this the overflow would
                 surface from ``struct.pack`` during :meth:`save`, as a message
-                naming neither the channel nor the limit. :class:`~walsh.task.Task`
+                naming neither the channel nor the limit. :class:`~walsh.codec.Codec`
                 checks the same bound from the image dimensions before doing any
                 work; this is the backstop for callers building a container
                 directly.
@@ -474,7 +474,7 @@ class CustomizableImage:
 
         Coefficients are rounded to nearest and clipped into the ``int16``
         range. For 8-bit input the clip cannot trigger at any block edge
-        :class:`~walsh.task.Task` accepts, since those are bounded by
+        :class:`~walsh.codec.Codec` accepts, since those are bounded by
         ``MAX_BLOCK_SIZE`` for exactly that reason; it stays as the last line
         of defence for a container built by hand, where it would silently
         saturate rather than raise. A channel is one array operation and one

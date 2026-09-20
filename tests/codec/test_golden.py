@@ -18,8 +18,8 @@ import numpy as np
 import pytest
 
 from conftest import Sample
+from walsh.codec import Codec
 from walsh.image import PNGImage, PPMImage
-from walsh.task import Task
 
 #: One picture in every container the codec reads. The PNG was written by
 #: Netpbm's `pnmtopng`, so it is compressed and filtered by libpng, and it must
@@ -32,7 +32,7 @@ def test_every_source_container_compresses_to_the_checked_in_cim(
     source: str, sample: Sample, tmp_path: Path
 ) -> None:
     output = tmp_path / "earth.cim"
-    Task().compress(input=str(sample(source)), output=str(output)).run()
+    Codec().compress(input=str(sample(source)), output=str(output)).run()
     assert output.read_bytes() == sample("transformed_earth.cim").read_bytes()
 
 
@@ -44,7 +44,7 @@ def test_every_source_container_agrees_with_every_other_exactly(
     digests = set()
     for source in SOURCES:
         output = tmp_path / f"{source}.cim"
-        Task().compress(input=str(sample(source)), output=str(output)).run()
+        Codec().compress(input=str(sample(source)), output=str(output)).run()
         digests.add(output.read_bytes())
     assert len(digests) == 1
 
@@ -57,7 +57,7 @@ def test_the_checked_in_cim_extracts_to_every_checked_in_reconstruction(
     target: str, sample: Sample, tmp_path: Path
 ) -> None:
     output = tmp_path / target
-    Task().extract(input=str(sample("transformed_earth.cim")), output=str(output)).run()
+    Codec().extract(input=str(sample("transformed_earth.cim")), output=str(output)).run()
     assert output.read_bytes() == sample(target).read_bytes()
 
 
@@ -66,8 +66,8 @@ def test_the_bmp_sample_round_trips_to_its_checked_in_reconstruction(
 ) -> None:
     compressed = tmp_path / "image.cim"
     restored = tmp_path / "recreated.bmp"
-    Task().compress(input=str(sample("image.bmp")), output=str(compressed)).run()
-    Task().extract(input=str(compressed), output=str(restored)).run()
+    Codec().compress(input=str(sample("image.bmp")), output=str(compressed)).run()
+    Codec().extract(input=str(compressed), output=str(restored)).run()
     assert restored.read_bytes() == sample("recreated.bmp").read_bytes()
 
 
@@ -83,7 +83,7 @@ def test_the_checked_in_png_is_pinned_by_its_pixels_not_its_bytes(
     expected.load(str(sample("recreated.ppm")))
 
     fresh = tmp_path / "recreated.png"
-    Task().extract(input=str(sample("transformed_earth.cim")), output=str(fresh)).run()
+    Codec().extract(input=str(sample("transformed_earth.cim")), output=str(fresh)).run()
 
     for path in (sample("recreated.png"), fresh):
         decoded = PNGImage()
@@ -108,7 +108,7 @@ def test_compressing_straight_to_a_picture_writes_the_checked_in_reconstruction(
     """`compress(input=picture, output=picture)` skips the .cim file (0.5.1),
     and must write what the two steps write, which is what is checked in."""
     output = tmp_path / target
-    Task().compress(input=str(sample(source)), output=str(output)).run()
+    Codec().compress(input=str(sample(source)), output=str(output)).run()
     assert output.read_bytes() == sample(target).read_bytes()
 
 
@@ -120,7 +120,7 @@ def test_compressing_straight_to_a_png_writes_the_checked_in_pixels(
     expected.load(str(sample("recreated.ppm")))
 
     output = tmp_path / "direct.png"
-    Task().compress(input=str(sample("earth.png")), output=str(output)).run()
+    Codec().compress(input=str(sample("earth.png")), output=str(output)).run()
     decoded = PNGImage()
     decoded.load(str(output))
     assert np.array_equal(decoded.get_array(), expected.get_array())

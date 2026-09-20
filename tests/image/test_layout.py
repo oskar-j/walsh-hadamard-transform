@@ -28,6 +28,8 @@ FORMAT_CLASSES = (
     "statement",
     [
         "from walsh import BMPImage, PickleImage, PNGImage",
+        "from walsh import Action, Codec",
+        "from walsh.codec import Action, Codec",
         "from walsh.image import BMPImage, TIFFImage, PPMImage, PAMImage, NPYImage, PickleImage",
         "from walsh.image import PNG_SIGNATURE, PNGImage",
         "from walsh.image.raster import BMPImage, PNGImage, TIFFImage",

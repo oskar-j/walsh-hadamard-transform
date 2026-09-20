@@ -84,7 +84,7 @@ class RasterImage(ABC):
         Almost every format carries its own size and its reader ignores this.
         It exists for input that does not: a pickled flat list of pixels is
         ``width * height`` tuples with nothing to say which is which. It does
-        not set the dimensions; ``load`` does, and :class:`~walsh.task.Task`
+        not set the dimensions; ``load`` does, and :class:`~walsh.codec.Codec`
         checks the result against the declaration for every format, so a
         declared size is honoured or verified, never silently dropped.
 
