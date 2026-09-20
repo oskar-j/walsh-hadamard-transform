@@ -107,10 +107,12 @@ def test_inverse_does_not_reapply_the_threshold() -> None:
     np.testing.assert_allclose(lossy.inverse_transform(spectrum), plain.inverse_transform(spectrum))
 
 
-def test_negative_coeff_is_rejected() -> None:
-    """It is compared against a magnitude, so a negative value keeps everything."""
+@pytest.mark.parametrize("coeff", [-1.0, float("nan")], ids=["negative", "nan"])
+def test_invalid_coeff_is_rejected(coeff: float) -> None:
+    """A negative or unordered threshold silently keeps every coefficient."""
     with pytest.raises(ValueError, match="non-negative"):
-        WalshHadamardTransform(coeff=-1.0)
+        WalshHadamardTransform(coeff=coeff)
+    WalshHadamardTransform(coeff=float("inf"))
 
 
 def test_matrix_memo_does_not_pin_transform_instances() -> None:
