@@ -291,12 +291,8 @@ Codec(packed_block_size=2).with_coeff_removal(40).compress(
 ).run()
 ```
 
-Up to 0.5.0 the class was called `Task` and the same was spelled
-`Task().with_action("compress").with_input(...).with_output(...).run()`. The
-old name and those three methods are gone, and so are the old argument-less
-`compress()` and `extract()`, which ran at once: `Task` becomes `Codec`, and
-each `with_action(A).with_input(X).with_output(Y)` becomes
-`A(input=X, output=Y)`.
+Code written for 0.5.0 or earlier needs two small changes, listed under 0.5.1
+in the [changelog](CHANGELOG.md).
 
 #### Skipping the `.cim` file
 

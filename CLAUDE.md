@@ -112,14 +112,16 @@ is where an import cycle between the family packages would show.
 **`codec.py`** — `Codec` is a fluent builder: `compress(input=, output=)` or
 `extract(input=, output=)` says what to do, `with_coeff_removal` and
 `with_input_size` are settings, and `run()` does it; nothing is read or
-written before `run()`. The class was `Task` in `walsh/task.py` up to 0.5.0;
-the maintainer renamed it `Codec` (0.5.1) because it compresses and extracts,
-which is what a codec is, and chose that over `Transformer`, which would have
-sat two letters from the exported `Transform` base class. The `compress` /
-`extract` shape is the maintainer's design too, from the same release, and
-replaced `with_action(A).with_input(X).with_output(Y)` outright: `Task`, those three
-methods and the old argument-less, run-at-once `compress()` / `extract()` are
-gone, with no deprecation shim, as the flat module paths went in 0.4.16. The
+written before `run()`. The name and the shape are the maintainer's design
+(0.5.1). It is called `Codec` because it compresses and extracts, which is
+what a codec is; `Transformer` was set aside because it would have sat two
+letters from the exported `Transform` base class. The class and its module
+had another name up to 0.5.0, and a three-call builder in place of `compress`
+/ `extract`. All of that went outright, with no alias and no deprecation
+shim, as the flat module paths went in 0.4.16, **and the old names are kept
+out of the source, the tests and the docs on purpose**: the 0.5.1 entry of
+`CHANGELOG.md` is the one place that maps old to new, which is where to look
+when an older changelog entry names something that no longer exists. The
 parameter is called `input` on purpose, builtin or not. The plan is recorded
 as an `Action` and dispatched through the `Codec._ACTIONS` ClassVar to the
 private `_compress` / `_extract`; adding an action means a public planning
@@ -652,10 +654,10 @@ regression tests it asked for and took coverage to 100%. v0.4.19 made the
 tests take the repository root from pytest's rootdir rather than from
 `__file__`. **v0.5.0 added PNG** (#17), the first compressed format, through
 stdlib `zlib` with the row filters undone a diagonal at a time, and grouped
-`data/` into a folder per file type. v0.5.1 renamed `Task` to `Codec`
-(`walsh/task.py` to `walsh/codec.py`), replaced the `with_action` /
-`with_input` / `with_output` builder with `compress(input=, output=)` and
-`extract(input=, output=)`, both breaking changes made on purpose, and let
+`data/` into a folder per file type. v0.5.1 gave the orchestrating class the
+name `Codec` (in `walsh/codec.py`) and the `compress(input=, output=)` /
+`extract(input=, output=)` calls, both breaking changes made on purpose and
+mapped from the old spellings in the CHANGELOG, and let
 `compress` write the reconstruction straight to a picture of the input's
 type, skipping the `.cim` file; other types are #51, for 0.6.0.
 Partially based on
