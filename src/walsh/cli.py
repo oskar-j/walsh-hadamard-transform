@@ -9,18 +9,25 @@ from pathlib import Path
 
 import click
 
-from walsh.exceptions import EXPECTED_ERRORS
-from walsh.task import (
+from walsh.codec import (
     DEFAULT_CHROMA_BLOCK_SIZE,
     DEFAULT_PACKED_BLOCK_SIZE,
     DEFAULT_Y_BLOCK_SIZE,
-    Action,
-    Task,
+    Codec,
 )
+from walsh.exceptions import EXPECTED_ERRORS
 
 __all__ = ["main"]
 
 CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
+
+#: What the command line reports as an ``Error:`` line rather than a traceback.
+#: ``NotImplementedError`` is added here and not to ``EXPECTED_ERRORS``: from
+#: the command line its one source is a picture output of a different file
+#: type from the input, which 0.6.0 will implement, whereas in a library it
+#: can also mean broken code, which should keep its traceback. It leaves this
+#: tuple when nothing raises it any more.
+_REPORTED: tuple[type[BaseException], ...] = (*EXPECTED_ERRORS, NotImplementedError)
 
 _INPUT_FILE = click.Path(exists=True, dir_okay=False, readable=True)
 _OUTPUT_FILE = click.Path(dir_okay=False, writable=True)
@@ -55,26 +62,26 @@ def _reject_writing_over_the_input(input_path: str, output_path: str) -> None:
         )
 
 
-def _run(configure: Callable[[], Task]) -> None:
-    """Build and run a task, turning expected failures into a clean CLI error.
+def _run(configure: Callable[[], Codec]) -> None:
+    """Build and run a codec, turning expected failures into a clean CLI error.
 
-    The task is built inside the guarded region, not passed in ready-made:
-    ``Task.__init__`` validates the block geometry (0.4.11, #21) and raises
+    The codec is built inside the guarded region, not passed in ready-made:
+    ``Codec.__init__`` validates the block geometry (0.4.11, #21) and raises
     ``ValueError`` for an edge that is not a power of two, one above the
     container's ceiling, or a packed size the reader would refuse, and that
     must surface as an ``Error:`` line rather than a traceback.
 
     Args:
-        configure: Returns the fully configured task.
+        configure: Returns the fully configured codec.
 
     Raises:
-        click.ClickException: If building or running the task fails for a
-            reason the user can act on, such as bad block sizes or a missing
-            or malformed input file.
+        click.ClickException: If building or running the codec fails for a
+            reason the user can act on, such as bad block sizes, a missing
+            or malformed input file, or a conversion not implemented yet.
     """
     try:
         configure().run()
-    except EXPECTED_ERRORS as error:
+    except _REPORTED as error:
         raise click.ClickException(str(error)) from error
 
 
@@ -163,7 +170,13 @@ def compress(
     width: int | None,
     height: int | None,
 ) -> None:
-    """Transform a raster image into a .cim file.
+    """Transform a raster image into a .cim file, or see what that does to it.
+
+    Name OUTPUT as a picture of the same type as INPUT, photo_lossy.ppm for
+    photo.ppm, and the .cim file is skipped: the picture is compressed and
+    restored in memory, and what is written is its lossy reconstruction,
+    exactly what extracting the .cim would have produced. A different
+    picture type is not supported yet; go through a .cim for that.
 
     The input format is taken from the filename suffix: .bmp, .png, .ppm,
     .pnm, .pam, .tif, .tiff, .npy for a bare NumPy array, or .pkl / .pickle
@@ -173,7 +186,8 @@ def compress(
     \f
     Args:
         input_path: Image to read.
-        output_path: Path of the .cim file to write.
+        output_path: Path of the .cim file to write, or of a picture of the
+            input's own type to write the reconstruction to.
         y_block_size: Block edge for the luma channel.
         chroma_block_size: Block edge for both chroma channels.
         packed_block_size: Coefficients kept per axis. This is the lossy knob.
@@ -182,8 +196,8 @@ def compress(
         height: Declared height of the input, or ``None``.
 
     Raises:
-        click.ClickException: If the image cannot be read or is malformed, or
-            is not the declared size.
+        click.ClickException: If the image cannot be read or is malformed, is
+            not the declared size, or OUTPUT is a picture of another type.
         click.UsageError: If OUTPUT names the same file as INPUT, or only one
             of --width and --height is given.
     """
@@ -192,7 +206,7 @@ def compress(
         raise click.UsageError("--width and --height must be given together")
     _run(
         lambda: (
-            Task(
+            Codec(
                 y_block_size=y_block_size,
                 cb_block_size=chroma_block_size,
                 cr_block_size=chroma_block_size,
@@ -200,9 +214,7 @@ def compress(
             )
             .with_coeff_removal(coeff_removal)
             .with_input_size(width, height)
-            .with_action(Action.COMPRESS)
-            .with_input(input_path)
-            .with_output(output_path)
+            .compress(input=input_path, output=output_path)
         )
     )
 
@@ -227,7 +239,7 @@ def extract(input_path: str, output_path: str) -> None:
         click.UsageError: If OUTPUT names the same file as INPUT.
     """
     _reject_writing_over_the_input(input_path, output_path)
-    _run(lambda: Task().with_action(Action.EXTRACT).with_input(input_path).with_output(output_path))
+    _run(lambda: Codec().extract(input=input_path, output=output_path))
 
 
 if __name__ == "__main__":  # pragma: no cover

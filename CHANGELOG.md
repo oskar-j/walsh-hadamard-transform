@@ -9,6 +9,123 @@ The `## [x.y.z]` headings are load-bearing: the release workflow extracts the
 section matching the version in `pyproject.toml` and uses it as the GitHub
 Release notes.
 
+## [0.5.1]
+
+### Changed
+
+- **`Task` is now `Codec`, and it names its input and output in one call.
+  Both are breaking changes, made together so that callers change once.**
+  The class compresses and extracts, which is what a codec is, and the
+  documentation had called it "the codec" all along. `compress(input=,
+  output=)` and `extract(input=, output=)` replace the three-call builder:
+
+  | Up to 0.5.0 | From 0.5.1 |
+  | --- | --- |
+  | `from walsh import Task` | `from walsh import Codec` |
+  | `Task().with_action("compress").with_input("a.ppm").with_output("a.cim").run()` | `Codec().compress(input="a.ppm", output="a.cim").run()` |
+  | `Task().with_action("extract").with_input("a.cim").with_output("b.bmp").run()` | `Codec().extract(input="a.cim", output="b.bmp").run()` |
+  | `Task(transform="dct")`, `Task(packed_block_size=2)` | `Codec(transform="dct")`, `Codec(packed_block_size=2)` |
+
+  Nothing is left behind under the old names: `Task`, `with_action`,
+  `with_input` and `with_output` are removed, not deprecated, and the module
+  `walsh.task` is now `walsh.codec`. The old `compress()` and `extract()`
+  took no arguments and ran at once; the names now belong to the methods
+  above, which only plan, and `run()` still does the work. Calling either
+  the old way is a `TypeError` naming the missing arguments.
+  `with_coeff_removal`, `with_input_size`, the constructor's keywords, the
+  `Action` enum and the `walsh` command are unchanged, and both arguments may
+  be given positionally. `run()` with nothing planned now says `nothing to
+  run; call compress() or extract() first`.
+
+### Added
+
+- **`compress` can skip the `.cim` file.** Name a picture as the output and
+  the picture goes through the whole codec in memory, and its lossy
+  reconstruction is written:
+
+  ```python
+  Codec().compress(input="data/ppm/earth.ppm", output="earth_compressed.ppm").run()
+  ```
+
+  The file is a picture like any other and as large as the input: it shows
+  the compression, it is not the compressed data. It is byte for byte what
+  compressing to a `.cim` and extracting that writes, by construction: the
+  container is serialised and parsed back in memory, so the decoder gets the
+  `int16`-rounded, zero-padded blocks a file would give it, not the unrounded
+  ones still in hand. The golden tests hold the direct route to every
+  checked-in `recreated.*` file, byte for byte, and to `recreated.png` by its
+  pixels. Every setting applies: block sizes, coefficient removal, the
+  transform, a declared input size.
+- What decides is the output's suffix: a picture suffix writes the
+  reconstruction, and anything else (`.cim`, another suffix, none, stdout)
+  the container, as before. One behaviour therefore changes: `compress` with
+  an output named `out.ppm` used to write a `.cim` under that name, and now
+  writes a PPM.
+- **The output must be the file type of the input, for now.** Another type,
+  such as `.ppm` to `.png`, raises `NotImplementedError` from `compress()`
+  itself, before anything is read. The message names 0.6.0 and
+  [#51](https://github.com/oskar-j/walsh-hadamard-transform/issues/51), and
+  the route that works today: compress to a `.cim`, then extract that to any
+  format. Suffixes that share a reader (`.tif` and `.tiff`, `.ppm` and
+  `.pnm`, `.pkl` and `.pickle`) are one type.
+- The command line inherits it: `walsh compress photo.ppm photo_lossy.ppm`
+  writes the reconstruction, and another file type is an `Error:` line with
+  the same message, not a traceback.
+- `CustomizableImage.to_bytes()` and `CustomizableImage.from_bytes()`: `save`
+  and `load` against memory, sharing their code. Also `get_descriptions()`
+  and `HEADER_SIZE`.
+- **`Vectorizer`: a picture as the coefficient vectors the codec keeps of it.**
+  `Codec` goes from file to file; this stops in the middle and hands the
+  numbers over:
+
+  ```python
+  vectorizer = Vectorizer(transform="walsh").parse(file_name="earth.png").compute()
+  vectorizer.vectors  # int16, shape (3750, 16)
+  print(vectorizer.describe())  # sizes, reduction, bits per pixel, PSNR
+  vectorizer.save(output_file_name="earth.cim")
+  ```
+
+  `parse()` reads a picture in any supported format and `compute()`
+  transforms it; `load()` reads a `.cim`, which already is vectors.
+  `vectors` (the same object as `_vectors`) is one `int16` array with a row
+  per block, luma first, then Cb, then Cr: every channel keeps the same
+  number of coefficients per block, so they fit one array, in the file's own
+  order and dtype. `vectors.tobytes()` is the `.cim` after its 26-byte
+  header, and `save()` writes byte for byte what `Codec().compress()` does.
+- `describe()` returns a `CompressionStats`: dimensions, block geometry,
+  vector counts per channel, coefficients stored and non-zero, raw, source
+  and compressed sizes, the reduction against each in percent, bits per
+  pixel, and PSNR with its mean squared error and largest error. `print()`
+  gives an aligned table. On `earth.ppm` it reports 25.07 dB and 75.0%,
+  the figures in `data/README.md`. After `load()` there is no original, so
+  the PSNR is `None` and the table says why.
+- **The vectors are the object's state, not a copy.** Write into them and
+  `describe()`, `reconstruct()` and `save()` follow, so an experiment is two
+  lines: `vectors[:, 1:] = 0` keeps each block's mean, and the PSNR of the
+  sample falls from 25.07 to 19.37 dB. Replacing `_vectors` by something of
+  another shape or dtype is a `ValueError` at the next use, naming both.
+- `reconstruct()` returns the picture the vectors decode to, as an array.
+  `save()` refuses a picture suffix, since a `.cim` under a picture's name
+  opens in nothing, and `parse()` sends a `.cim` to `load()`.
+- `Codec.encode(pixels)` and `Codec.decode(container)`: the in-memory halves
+  of `compress` and `extract`, an array in and a container out and the
+  reverse, which is what `Vectorizer` is built on. `decode` puts the
+  container through its bytes whatever its origin, so every route to a
+  picture agrees. `Codec.transform` reads back the transform in use, and
+  `PixelArray` is exported from `walsh.image`.
+
+### Fixed
+
+- **A `.cim` that was loaded could not be saved again.** A loaded container
+  holds its blocks zero-padded back to full size, and `save()` wrote those
+  under a header that still declared the packed size: 960,026 bytes for a
+  120,026-byte file, which then decoded to noise. Nothing in the codec saved
+  a container it had loaded, so nothing noticed; `Vectorizer.load()` followed
+  by `save()` would have. Blocks are now cropped to their packed corner on
+  every write, not only in `set_data`.
+
+Codec output is unchanged: every checked-in file is still reproduced exactly.
+
 ## [0.5.0]
 
 ### Added

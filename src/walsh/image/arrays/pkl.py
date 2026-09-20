@@ -23,7 +23,7 @@ What may be inside, since a pickle can hold anything:
 * a **flat list of pixels**, ``[(r, g, b), ...]``, top row first. That does
   not say how wide the picture is, and nothing here guesses, so the size must
   be declared: by pickling ``{"width": w, "height": h, "pixels": [...]}``
-  instead, or with ``--width`` / ``--height`` (``Task.with_input_size``).
+  instead, or with ``--width`` / ``--height`` (``Codec.with_input_size``).
 
 Lists and tuples are interchangeable at every level, samples must be integers
 in 0-255 (Python's or NumPy's, never floats or booleans), and ragged rows are
@@ -376,7 +376,7 @@ def _array_from_sequence(
             f"unsupported {label}: a flat list of {count} pixels does not say how wide the "
             f"picture is. Nest the pixels in rows, pickle {{'width': w, 'height': h, "
             f"'pixels': [...]}} instead, or declare the size with --width and --height "
-            f"(Task.with_input_size)"
+            f"(Codec.with_input_size)"
         )
     width, height = declared
     if width * height != count:

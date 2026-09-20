@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from conftest import Sample
 from walsh.image import (
     BlockDescription,
     CustomizableImage,
@@ -217,7 +218,7 @@ def test_cim_saves_a_channel_with_no_blocks_as_nothing(tmp_path: Path) -> None:
 
 
 def test_set_descriptions_rejects_a_block_count_the_field_cannot_hold() -> None:
-    """The backstop for callers building a container directly rather than via Task.
+    """The backstop for callers building a container directly rather than via Codec.
 
     Without it the overflow surfaced from struct.pack during save(), naming
     neither the channel nor the limit.
@@ -264,7 +265,7 @@ def test_every_shipped_encoder_configuration_still_loads(tmp_path: Path) -> None
     encoder can produce: padded dimensions, every packed size, and odd block
     combinations, not just the defaults."""
     from conftest import gradient_pixels, write_ppm
-    from walsh.task import Task
+    from walsh.codec import Codec
 
     width, height = 13, 7  # a multiple of neither block size
     source = write_ppm(tmp_path / "odd.ppm", width, height, gradient_pixels(width, height))
@@ -277,9 +278,7 @@ def test_every_shipped_encoder_configuration_still_loads(tmp_path: Path) -> None
     ]
     for index, kwargs in enumerate(configurations):
         output = tmp_path / f"{index}.cim"
-        Task(**kwargs).with_action("compress").with_input(str(source)).with_output(
-            str(output)
-        ).run()
+        Codec(**kwargs).compress(input=str(source), output=str(output)).run()
         image = CustomizableImage.load(str(output))
         assert image.get_dimensions() == (width, height), kwargs
         assert len(image.get_y_data()) > 0, kwargs
@@ -315,7 +314,7 @@ def test_get_stack_of_an_empty_channel_has_zero_length() -> None:
 
 
 def test_set_data_accepts_a_stack_as_well_as_a_list(tmp_path: Path) -> None:
-    """Task hands over one (count, edge, edge) array; direct callers a list."""
+    """Codec hands over one (count, edge, edge) array; direct callers a list."""
     description = BlockDescription(4, 2, 2)
     stack = np.arange(2 * 4 * 4, dtype=float).reshape(2, 4, 4)
     as_array, as_list = CustomizableImage(), CustomizableImage()
@@ -351,3 +350,51 @@ def test_saving_without_block_descriptions_is_an_error(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="no block description set for channel 'y'"):
         image.save(str(output))
     assert not output.exists()
+
+
+def test_the_container_in_memory_is_the_container_on_disk(tmp_path: Path) -> None:
+    """`to_bytes` is what `save` writes and `from_bytes` reads what `load`
+    reads, which is what lets Codec skip the file without changing a pixel."""
+    image = CustomizableImage()
+    image.set_dimensions(16, 8)
+    image.set_descriptions(
+        BlockDescription(8, 4, 2), BlockDescription(16, 4, 1), BlockDescription(16, 4, 1)
+    )
+    rng = np.random.default_rng(5)
+    luma = rng.uniform(-900, 900, size=(2, 8, 8))
+    chroma = rng.uniform(-900, 900, size=(1, 16, 16))
+    image.set_data(luma, chroma, chroma)
+
+    path = tmp_path / "c.cim"
+    image.save(str(path))
+    assert image.to_bytes() == path.read_bytes()
+
+    from_disk = CustomizableImage.load(str(path))
+    from_memory = CustomizableImage.from_bytes(image.to_bytes())
+    assert from_memory.get_dimensions() == from_disk.get_dimensions() == (16, 8)
+    for channel in ("y", "cb", "cr"):
+        assert np.array_equal(from_memory.get_stack(channel), from_disk.get_stack(channel))
+    # Rounded to int16 and zero-padded back to full blocks: not what went in.
+    assert from_memory.get_stack("y").shape == (2, 8, 8)
+    assert np.array_equal(from_memory.get_stack("y")[:, :4, :4], np.rint(luma[:, :4, :4]))
+    assert not from_memory.get_stack("y")[:, 4:, :].any()
+
+
+def test_bytes_that_are_not_a_container_are_refused_like_a_file() -> None:
+    with pytest.raises(UnsupportedFileFormatError, match="truncated"):
+        CustomizableImage.from_bytes(b"\x10\x00\x00")
+    with pytest.raises(UnsupportedFileFormatError):
+        CustomizableImage.from_bytes(b"P6\n4 4\n255\n" + bytes(64))
+
+
+def test_a_container_that_was_loaded_can_be_saved_again(tmp_path: Path, sample: Sample) -> None:
+    """It could not, up to 0.5.0. A loaded container holds its blocks
+    zero-padded back to full size, and save() wrote those under a header that
+    still declared the packed size: 960,026 bytes for a 120,026-byte file,
+    which then decoded to noise. Nothing in the codec saves a container it
+    loaded, so nothing noticed until something needed to."""
+    original = sample("transformed_earth.cim")
+    again = tmp_path / "again.cim"
+    CustomizableImage.load(str(original)).save(str(again))
+    assert again.read_bytes() == original.read_bytes()
+    assert CustomizableImage.load(str(again)).to_bytes() == original.read_bytes()

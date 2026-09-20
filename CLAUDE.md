@@ -10,7 +10,7 @@ uv-first; `uv.lock` is committed and CI syncs from it.
 uv sync --group dev --all-extras         # dev setup; requires Python 3.10+
 uv run pytest                            # full suite
 uv run pytest --cov --cov-report=term-missing   # with coverage (floor 90%)
-uv run pytest tests/codec/test_task.py -k roundtrip   # single test / pattern
+uv run pytest tests/codec/test_codec.py -k roundtrip   # single test / pattern
 uv run ruff check . && uv run ruff format .
 uv run mypy                              # strict; config selects the walsh package
 uv build                                 # sdist + wheel
@@ -45,7 +45,7 @@ exception lands in `result.exception` and is *not* printed, so a CLI test for
 `_reject_writing_over_the_input` runs first in both subcommands: the pipelines
 read the whole image before writing, so `walsh compress p.bmp p.bmp` used to
 succeed and destroy the original. It compares by `os.path.samefile` when OUTPUT
-exists, so aliases count. It belongs in the CLI, not in `Task`, whose
+exists, so aliases count. It belongs in the CLI, not in `Codec`, whose
 `FileSource` may legitimately be `None` for the stdin/stdout path.
 
 ## Layout
@@ -67,9 +67,10 @@ src/walsh/image/            tests/
   cim.py       the container    raster/          test_bmp, test_png, test_tiff
   raster/      bmp, png, tiff   netpbm/          test_ppm, test_pam
   netpbm/      ppm, pam,        arrays/          test_npy, test_pickle
-               _samples       codec/             test_task, test_transforms,
-  arrays/      npy, pkl,                         test_custom_transform,
-               _rules                            test_colors, test_golden
+               _samples       codec/             test_codec, test_direct,
+  arrays/      npy, pkl,                         test_vectorizer, test_transforms,
+               _rules                            test_custom_transform,
+                                                 test_colors, test_golden
                               cli/               test_cli
                               support/           test_decorators, test_exceptions
                               project/           test_requirements_mirror,
@@ -106,23 +107,100 @@ is where an import cycle between the family packages would show.
 
 ## Architecture
 
-`walsh.task` orchestrates; the other modules are layers under it.
+`walsh.codec` orchestrates; the other modules are layers under it.
 
-**`task.py`** — `Task` is a fluent builder (`with_action`, `with_input`,
-`with_output`, `with_coeff_removal`, then `run()`). Actions are the `Action`
-enum, dispatched through the `Task._ACTIONS` ClassVar; adding an action means
-adding a method *and* an entry there. Block sizes are constructor kwargs
-defaulting to the original values (Y 8, chroma 16, packed 4), and
-`Task.__init__` validates them (0.4.11, #21): each edge a positive power of
+**`codec.py`** — `Codec` is a fluent builder: `compress(input=, output=)` or
+`extract(input=, output=)` says what to do, `with_coeff_removal` and
+`with_input_size` are settings, and `run()` does it; nothing is read or
+written before `run()`. The name and the shape are the maintainer's design
+(0.5.1). It is called `Codec` because it compresses and extracts, which is
+what a codec is; `Transformer` was set aside because it would have sat two
+letters from the exported `Transform` base class. The class and its module
+had another name up to 0.5.0, and a three-call builder in place of `compress`
+/ `extract`. All of that went outright, with no alias and no deprecation
+shim, as the flat module paths went in 0.4.16, **and the old names are kept
+out of the source, the tests and the docs on purpose**: the 0.5.1 entry of
+`CHANGELOG.md` is the one place that maps old to new, which is where to look
+when an older changelog entry names something that no longer exists. The
+parameter is called `input` on purpose, builtin or not. The plan is recorded
+as an `Action` and dispatched through the `Codec._ACTIONS` ClassVar to the
+private `_compress` / `_extract`; adding an action means a public planning
+method, a private pipeline *and* an entry there. The arithmetic is two
+public, in-memory halves, `encode(pixels)` (array in, `CustomizableImage`
+out) and `decode(container)` (container in, array out), which run at once;
+`_read_picture` and `_write_picture` are the file ends, and `_compress` /
+`_extract` are compositions of the four. `transform` reads back the
+transform in use.
+
+**`compress` with a picture as its output skips the `.cim` file** (0.5.1):
+`Codec().compress(input="a.ppm", output="a_compressed.ppm")` writes the lossy
+reconstruction. What decides is `_writes_a_picture`: a suffix in `SUFFIXES`
+means a picture, and anything else (`.cim`, another suffix, none, stdout) the
+container, as before. The container still goes through its bytes, in memory:
+`decode` starts with `CustomizableImage.from_bytes(container.to_bytes())`,
+whatever the container's origin. Do not "optimise" that away. A container
+fresh from `encode` holds *unrounded* blocks *cropped* to the packed corner,
+while a decoder is owed what a file gives it, `int16`-rounded, clipped and
+zero-padded to full blocks; going through `_write` / `_read`, the code `save`
+/ `load` use, is what makes every route to a picture identical to the
+two-step one by construction, and `test_golden.py` holds it to the checked-in `recreated.*`
+files byte for byte (PNG by pixels). **The output must be the input's file
+type for now**: anything else is a `NotImplementedError` raised by
+`compress()` itself, before anything is read and leaving the codec unchanged,
+naming 0.6.0 and issue #51 (`CROSS_FORMAT_ISSUE`). The type is the reader
+class, so `.tif`/`.tiff`, `.ppm`/`.pnm` and `.pkl`/`.pickle` do not cross,
+and stdin counts as BMP. The restriction is the maintainer's staging, not a
+technical limit: `_decode` ends in `reader_for(output)` and would write any
+format, so #51 is mostly the removal of that check plus its tests. The CLI
+inherits the feature because it builds a `Codec`
+(`walsh compress a.ppm a_lossy.ppm`), and reports the refusal as an `Error:`
+line through `_REPORTED` in `cli.py`, which adds `NotImplementedError` to
+`EXPECTED_ERRORS` for the command line only: in a library it can also mean
+broken code (an abstract `Transform` method), which should keep its
+traceback. Take it out of `_REPORTED` when nothing raises it.
+
+**`vectorizer.py`** (0.5.1) — `Vectorizer` is the maintainer's design: the
+codec stopped in the middle, where the picture is numbers.
+`parse(file_name=)` reads a picture and `compute()` transforms it;
+`load(file_name=)` reads a `.cim`, which already is vectors, so `compute()`
+then does nothing (on purpose: there is no picture to compute from, and a
+caller's generic parse-or-load pipeline should not have to branch).
+`describe()` returns a frozen `CompressionStats` whose `__str__` is the
+table; `reconstruct()` and `save(output_file_name=)` complete it. It *has* a
+`Codec` and uses only its public `encode` / `decode` / `transform`. **The
+vectors are one `int16` array of shape `(blocks, packed ** 2)`**, luma rows
+first, then Cb, then Cr, each row-major: one array is possible only because
+every channel keeps the same `packed_block_size`, and it is the `.cim`'s own
+order and dtype, so `vectors.tobytes()` is the file after
+`CustomizableImage.HEADER_SIZE` (26) bytes. `_take` gets them by putting the
+container through `to_bytes()`, so they are the rounded values a file would
+hold. A hand-made `.cim` whose channels keep different amounts is refused by
+name, since it has vectors of two lengths. **The vectors are the state, not a
+copy**: the maintainer asked for `_vectors` to be the raw numpy object, so it
+is one attribute, `vectors` is a property returning the same array, and
+`describe` / `reconstruct` / `save` all rebuild the container from it through
+`_container()`. Because `_vectors` can be *replaced* as well as written into,
+`_checked()` verifies dtype and shape at every use; keep every reader going
+through it. PSNR needs the parsed picture, so after `load()` it is `None`
+and the table says why; `_forget()` runs after a successful read, never
+before, so a failed `parse` leaves the previous state intact. `save()`
+refuses a picture suffix (a `.cim` under a picture's name opens in nothing)
+and `parse()` sends a `.cim` to `load()`. The README's example output and its
+19.37 dB figure are from a real run on `data/png/earth.png`; rerun it if the
+codec changes.
+
+Block sizes are constructor kwargs defaulting to the original values (Y 8,
+chroma 16, packed 4), and
+`Codec.__init__` validates them (0.4.11, #21): each edge a positive power of
 two no larger than `MAX_BLOCK_SIZE` (`COEFF_MAX // 255` = 128, above which an
 all-255 block's DC overflows `int16` and the clip on write silently halves
 it), and the packed size between 1 and the smallest edge. Packed need *not*
 be a power of two — 3 and 6 round-trip and are tested — and packed equal to
 the edge is legal. `CustomizableImage.set_data` mirrors the packed check on
-the write side. The CLI builds the `Task` inside `_run`'s guarded region for
-this reason: `_run` takes a factory, not a task.
+the write side. The CLI builds the `Codec` inside `_run`'s guarded region for
+this reason: `_run` takes a factory, not a codec.
 
-`Task(transform=...)` (0.4.13, #41) takes a `Transform` **instance** or, since
+`Codec(transform=...)` (0.4.13, #41) takes a `Transform` **instance** or, since
 0.4.14, a **name** resolved by `transform_for` — `"walsh"`, `"dct"`, `"haar"`,
 case-insensitive, an unknown one a `ValueError` listing them — default
 `WalshHadamardTransform()`, used by both directions; anything else is a
@@ -132,10 +210,10 @@ its transform, so a file written with a custom one decodes under the default
 without complaint into a degraded picture (pinned by
 `test_a_cim_does_not_record_its_transform`). Do not add a CLI option for it
 without first giving the container a way to say which transform wrote it,
-which is a format change. Task calls `transform_stack` /
+which is a format change. Codec calls `transform_stack` /
 `inverse_transform_stack`, never `transform` on a stack, because a subclass
 only promises single blocks; it checks the returned shape and names the
-class. Coefficient removal is applied by Task after the transform
+class. Coefficient removal is applied by Codec after the transform
 (`remove_small_coefficients`, shared with `WalshHadamardTransform(coeff=...)`
 so the two cannot drift), which is what makes it work for any transform, and
 `with_coeff_removal` rejects a negative value when it is set.
@@ -143,7 +221,7 @@ so the two cannot drift), which is what makes it work for any transform, and
 Between `load` and `save` everything is numpy, and since 0.4.10 (#27) so is
 the raster contract itself: `compress` reads `image.get_array().reshape(-1, 3)`
 and `extract` ends in `image.set_array(...)`, with no list of tuples anywhere.
-`_slice` returns the `(count, edge, edge)` stack it builds, `Task` hands it
+`_slice` returns the `(count, edge, edge)` stack it builds, `Codec` hands it
 to `transform_stack` whole (the built-in has taken a stack since 0.4.0), and
 `_merge` takes the stack back through `np.asarray`, free for an array and a
 stack for a list. `_merge` derives its row count from the declared height,
@@ -173,7 +251,15 @@ documented `set_dimensions` then `set_raw_data` build is transiently
 inconsistent by design. `CustomizableImage` is deliberately not a
 `RasterImage`; it holds each channel as one `(count, edge, edge)` stack,
 `get_stack(channel)` is the array form, and `get_y_data()` and friends return
-views into it. `bmp.py` converts both ways (BMP is blue-green-red and
+views into it. `to_bytes()` / `from_bytes()` (0.5.1) are `save` / `load`
+against memory, sharing `_write` / `_read` with them. **`_write` crops every
+block to its packed corner, as `set_data` does** (0.5.1): a container that
+came from `load()` holds blocks zero-padded to full size, and until then
+`save()` wrote those under a header declaring the packed size, eight times
+too large and decoding to noise. Nothing saved a loaded container before
+`Vectorizer`, so nothing noticed. `get_descriptions()` and `HEADER_SIZE`
+date from the same release. `bmp.py` converts both
+ways (BMP is blue-green-red and
 bottom-up, two reversed views); `png.py`, `ppm.py`, `pam.py`, `tiff.py` and
 `npy.py` need no conversion.
 
@@ -217,8 +303,8 @@ unable to import, open, or allocate from its arguments. `MemoryError` is
 re-raised, not converted, for the reason given under `EXPECTED_ERRORS`. A
 flat list has no dimensions and nothing guesses them (160,000 pixels are
 400x400 or 200x800): the size comes from the dict or from
-`RasterImage.declare_size`, which `Task.with_input_size` and the CLI's
-`--width` / `--height` feed. `Task` verifies a declared size against every
+`RasterImage.declare_size`, which `Codec.with_input_size` and the CLI's
+`--width` / `--height` feed. `Codec` verifies a declared size against every
 format after `load`, so it is honoured or verified, never dropped, and
 rejects one on `extract`. Lists are flattened with `itertools.chain` into
 `np.fromiter`, per the rule above, through `_Reiterable` because the samples
@@ -256,7 +342,7 @@ critical but in a truecolour file only suggests a palette, so it is skipped.
 **The filters are undone without a loop over pixels.** Sub, Average and Paeth
 predict from the pixel to the left, which was itself predicted, so the
 textbook decoder walks every byte, which #17 expected and which the rule
-under `task.py` forbids. A pixel needs only its left, upper and upper-left
+under `codec.py` forbids. A pixel needs only its left, upper and upper-left
 neighbours, all on the two anti-diagonals before its own, so
 `_undo_by_wavefront` copies a band into a skewed grid where each
 anti-diagonal is one contiguous row (`skewed[x + r + 1, r]`, row 0 being the
@@ -310,7 +396,7 @@ strip reader, not loosening the checks. `cim.py` holds
 `int16` — its channel dicts are keyed `"y"`, `"cb"`, `"cr"` and rely on dict
 insertion order matching the on-disk order. `number_of_blocks` is a `H`, so
 `MAX_BLOCKS_PER_CHANNEL` is 65535 and the codec caps out near 4.2 MP at the
-default 8-pixel luma block. `Task._check_fits_the_container` rejects an
+default 8-pixel luma block. `Codec._check_fits_the_container` rejects an
 oversized image up front, naming the channel and the block size that would fit
 (0.4.6, #19); `set_descriptions` re-checks as a backstop. Widening the field
 would raise the ceiling and break every existing `.cim`, so it is a format
@@ -322,7 +408,7 @@ descriptions are read (so a short header is still "truncated", not
 "inconsistent") and requires positive dimensions, a power-of-two block size, a
 packed size in `1..block`, and a block count of `0` or exactly
 `blocks_for(width, height, block)`. That count rule is exact — the encoder pads
-to a block multiple — and `blocks_for` is the one implementation both `Task`
+to a block multiple — and `blocks_for` is the one implementation both `Codec`
 and the reader use. `.cim` has no signature, so this is also how a file that
 is not a `.cim` at all is caught. Coefficients are read in bounded chunks
 (`_read_up_to`) because `file.read(n)` allocates `n` bytes first. A channel
@@ -353,8 +439,8 @@ from the umask, since `mkstemp` creates `0o600`.
 Adding a format means a new module in the family folder it belongs to (or a
 new folder, for a new family), subclassing `RasterImage`, plus an import and an
 entry in `SUFFIXES` in `image/__init__.py`, a test module in the matching
-`tests/image/` folder, and its samples in `data/<suffix>/`. Honour the RGB top-down contract there, not in `Task`. The contract
-is what makes the source format irrelevant to the output: `tests/codec/test_task.py`
+`tests/image/` folder, and its samples in `data/<suffix>/`. Honour the RGB top-down contract there, not in `Codec`. The contract
+is what makes the source format irrelevant to the output: `tests/codec/test_codec.py`
 asserts that BMP, PPM, PAM and TIFF of one picture compress to byte-identical
 `.cim`.
 
@@ -454,9 +540,9 @@ traceback on truncated input.
 The transform is lossless and involutive. The loss is in
 `CustomizableImage.set_data`, which crops each block to its top-left
 `packed_block_size` square — at the default 4 that is 16 of 64 luma
-coefficients and 16 of 256 chroma coefficients. `Task._slice` pads the image
+coefficients and 16 of 256 chroma coefficients. `Codec._slice` pads the image
 up to a block multiple **by replicating its last row and column**
-(`mode="edge"`), and `Task._merge` crops the padding back off. The padding
+(`mode="edge"`), and `Codec._merge` crops the padding back off. The padding
 shares its blocks with real pixels and the transform is low-pass, so whatever
 fills it is smeared back over the last few real columns and rows: zero-filling
 put a black-and-saturated seam there, off by up to 200 of 255 on flat colour
@@ -594,7 +680,7 @@ the lock, the sdist and the release assets (#25), tracked the reference
 platforms precisely. v0.4.12 made the transform's arithmetic exact (#39), so
 output is byte-identical on every platform and the decode no longer truncates
 a level low where the true value is an integer. v0.4.13 added
-`Task(transform=...)` (#41) so other block transforms can reuse the pipeline
+`Codec(transform=...)` (#41) so other block transforms can reuse the pipeline
 for experiments, v0.4.14 shipped a DCT-II and a Haar transform selectable
 by name, and v0.4.15 added pickled arrays and pixel lists as input, read
 through an allowlist so nothing in the file is executed, plus a generated
@@ -606,6 +692,13 @@ regression tests it asked for and took coverage to 100%. v0.4.19 made the
 tests take the repository root from pytest's rootdir rather than from
 `__file__`. **v0.5.0 added PNG** (#17), the first compressed format, through
 stdlib `zlib` with the row filters undone a diagonal at a time, and grouped
-`data/` into a folder per file type.
+`data/` into a folder per file type. v0.5.1 gave the orchestrating class the
+name `Codec` (in `walsh/codec.py`) and the `compress(input=, output=)` /
+`extract(input=, output=)` calls, both breaking changes made on purpose and
+mapped from the old spellings in the CHANGELOG, and let
+`compress` write the reconstruction straight to a picture of the input's
+type, skipping the `.cim` file; other types are #51, for 0.6.0. It also
+added `Vectorizer`, a picture as its coefficient vectors with statistics, and
+fixed the saving of a loaded `.cim`.
 Partially based on
 https://github.com/ktisha/python2012/tree/dee4beda8e22f3a66a3e31384d4b72ab66102e88/avereshchagin

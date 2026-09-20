@@ -92,7 +92,7 @@ Three invariants are load-bearing and easy to break by accident:
 * **Raster images are RGB, top row first, in memory** — whatever the file
   itself stores. BMP is the awkward one, storing blue-green-red samples in
   bottom-up rows, and `BMPImage` converts in both directions. Honour this in
-  the format class, never in `Task`, or cross-format conversion silently swaps
+  the format class, never in `Codec`, or cross-format conversion silently swaps
   channels or flips the picture.
 * **Never apply `@cached` to a method.** `self` joins the cache key by strong
   reference, so every instance is kept alive forever. Make the function module
@@ -118,7 +118,7 @@ name no other test module has. Convert to and from the in-memory
 contract inside that class: decode with `np.frombuffer` and hand `set_array` a
 `(height, width, 3)` `uint8` array, and serialise from `get_array()`. Never
 build a list of tuples on the way — routing one through `np.asarray` is slower
-than per-pixel Python. Nothing in `Task` or the CLI needs to change. A sample
+than per-pixel Python. Nothing in `Codec` or the CLI needs to change. A sample
 file goes in `data/<suffix>/`, which is where the `sample` fixture looks for it
 from the file name alone.
 

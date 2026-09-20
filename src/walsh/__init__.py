@@ -2,16 +2,20 @@
 
 Typical use::
 
-    from walsh import Task
+    from walsh import Codec
 
-    Task().with_action("compress").with_input("image.bmp").with_output("out.cim").run()
-    Task().with_action("extract").with_input("out.cim").with_output("back.bmp").run()
+    Codec().compress(input="image.bmp", output="out.cim").run()
+    Codec().extract(input="out.cim", output="back.bmp").run()
+
+    # Or skip the .cim and write the lossy reconstruction directly:
+    Codec().compress(input="image.bmp", output="image_compressed.bmp").run()
 """
 
 from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError, version
 
+from walsh.codec import Action, Codec
 from walsh.colors import ColorModel, RgbColorModel, YCbCrColorModel
 from walsh.exceptions import UnsupportedFileFormatError, WalshError
 from walsh.image import (
@@ -27,7 +31,6 @@ from walsh.image import (
     TIFFImage,
     reader_for,
 )
-from walsh.task import Action, Task
 from walsh.transforms import (
     DiscreteCosineTransform,
     HaarTransform,
@@ -36,6 +39,7 @@ from walsh.transforms import (
     WalshHadamardTransform,
     transform_for,
 )
+from walsh.vectorizer import CompressionStats, Vectorizer
 
 try:
     __version__ = version("walsh")
@@ -46,7 +50,9 @@ __all__ = [
     "Action",
     "BMPImage",
     "BlockDescription",
+    "Codec",
     "ColorModel",
+    "CompressionStats",
     "CustomizableImage",
     "DiscreteCosineTransform",
     "HaarTransform",
@@ -59,9 +65,9 @@ __all__ = [
     "RasterImage",
     "RgbColorModel",
     "TIFFImage",
-    "Task",
     "Transform",
     "UnsupportedFileFormatError",
+    "Vectorizer",
     "WalshError",
     "WalshHadamardTransform",
     "YCbCrColorModel",

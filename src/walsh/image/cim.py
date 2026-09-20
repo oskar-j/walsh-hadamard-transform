@@ -7,6 +7,7 @@ little-endian ``int16``. It is a project-specific format; nothing else reads it.
 
 from __future__ import annotations
 
+import io
 import struct
 from collections.abc import Sequence
 from typing import BinaryIO, NamedTuple
@@ -94,6 +95,10 @@ class CustomizableImage:
     HEADER_FORMAT = "<II"
     DESCRIPTION_FORMAT = "<HHH"
 
+    #: Bytes before the first coefficient: the dimensions, then a description
+    #: for each of the three channels.
+    HEADER_SIZE = struct.calcsize(HEADER_FORMAT) + 3 * struct.calcsize(DESCRIPTION_FORMAT)
+
     def __init__(self) -> None:
         """Create an empty container with no descriptions and no blocks."""
         self._width = 0
@@ -166,7 +171,7 @@ class CustomizableImage:
            transform requires anyway;
         3. the packed size is at least 1 and no larger than the block;
         4. the block count is either 0, the "empty channel" state that
-           :meth:`~walsh.task.Task.extract` fills with a neutral value, or
+           :meth:`~walsh.codec.Codec.extract` fills with a neutral value, or
            exactly the count a plane of these dimensions is cut into.
 
         It runs after all three descriptions are read, so a file cut short in
@@ -260,12 +265,49 @@ class CustomizableImage:
                 file that is not a ``.cim`` at all is caught.
             OSError: If the file cannot be read.
         """
-        image = cls()
         with open_binary_read(filename) as file:
-            image._read_header(file)
-            for channel, description in image._descriptions.items():
-                if description is not None and description.number_of_blocks > 0:
-                    image._data[channel] = cls._read_blocks(file, description)
+            return cls._read(file)
+
+    @classmethod
+    def from_bytes(cls, data: bytes) -> CustomizableImage:
+        """Read a ``.cim`` held in memory, exactly as :meth:`load` reads a file.
+
+        With :meth:`to_bytes` this is how :class:`~walsh.codec.Codec` sends a
+        picture through the codec without an intermediate file: the decoder is
+        handed the very bytes a file would have held, so the result cannot
+        differ from a compress followed by an extract.
+
+        Args:
+            data: The whole container.
+
+        Returns:
+            The populated container.
+
+        Raises:
+            UnsupportedFileFormatError: If the data is truncated, or its
+                header does not describe a consistent image.
+        """
+        return cls._read(io.BytesIO(data))
+
+    @classmethod
+    def _read(cls, file: BinaryIO) -> CustomizableImage:
+        """Read a container from a stream, header first.
+
+        Args:
+            file: Stream positioned at the start of the container.
+
+        Returns:
+            The populated container.
+
+        Raises:
+            UnsupportedFileFormatError: If the stream is truncated, or its
+                header does not describe a consistent image.
+        """
+        image = cls()
+        image._read_header(file)
+        for channel, description in image._descriptions.items():
+            if description is not None and description.number_of_blocks > 0:
+                image._data[channel] = cls._read_blocks(file, description)
         return image
 
     def get_stack(self, channel: str) -> Block:
@@ -313,6 +355,23 @@ class CustomizableImage:
         """
         return list(self._data["cr"])
 
+    def get_descriptions(self) -> dict[str, BlockDescription]:
+        """Return each channel's layout record.
+
+        Returns:
+            The descriptions keyed ``"y"``, ``"cb"``, ``"cr"``, in that order.
+
+        Raises:
+            ValueError: If :meth:`set_descriptions` has not been called, and
+                the container was not loaded from anywhere.
+        """
+        found: dict[str, BlockDescription] = {}
+        for channel, description in self._descriptions.items():
+            if description is None:
+                raise ValueError(f"no block description set for channel {channel!r}")
+            found[channel] = description
+        return found
+
     def get_dimensions(self) -> tuple[int, int]:
         """Return the dimensions of the picture these blocks encode.
 
@@ -351,7 +410,7 @@ class CustomizableImage:
             ValueError: If a channel declares more blocks than the container's
                 16-bit count field can hold. Without this the overflow would
                 surface from ``struct.pack`` during :meth:`save`, as a message
-                naming neither the channel nor the limit. :class:`~walsh.task.Task`
+                naming neither the channel nor the limit. :class:`~walsh.codec.Codec`
                 checks the same bound from the image dimensions before doing any
                 work; this is the backstop for callers building a container
                 directly.
@@ -415,20 +474,23 @@ class CustomizableImage:
             cropped = [block[:packed, :packed] for block in blocks]
             self._data[channel] = np.stack(cropped) if cropped else _EMPTY_STACK
 
-    def _write_header(self, file: BinaryIO) -> None:
+    def _write_header(self, file: BinaryIO) -> dict[str, BlockDescription]:
         """Write the dimensions and the three block descriptions.
 
         Args:
             file: Stream to write to.
 
+        Returns:
+            The descriptions written, every one of them known to be set.
+
         Raises:
             ValueError: If any channel has no description set.
         """
+        descriptions = self.get_descriptions()
         file.write(struct.pack(self.HEADER_FORMAT, self._width, self._height))
-        for channel, description in self._descriptions.items():
-            if description is None:
-                raise ValueError(f"no block description set for channel {channel!r}")
+        for description in descriptions.values():
             file.write(struct.pack(self.DESCRIPTION_FORMAT, *description))
+        return descriptions
 
     @staticmethod
     def _write_blocks(file: BinaryIO, blocks: Block) -> None:
@@ -436,7 +498,7 @@ class CustomizableImage:
 
         Coefficients are rounded to nearest and clipped into the ``int16``
         range. For 8-bit input the clip cannot trigger at any block edge
-        :class:`~walsh.task.Task` accepts, since those are bounded by
+        :class:`~walsh.codec.Codec` accepts, since those are bounded by
         ``MAX_BLOCK_SIZE`` for exactly that reason; it stays as the last line
         of defence for a container built by hand, where it would silently
         saturate rather than raise. A channel is one array operation and one
@@ -444,7 +506,8 @@ class CustomizableImage:
 
         Args:
             file: Stream to write to.
-            blocks: The channel's already-cropped blocks as one stack.
+            blocks: The channel's blocks, cropped to the packed corner, as
+                one stack.
         """
         if len(blocks) == 0:
             return
@@ -462,6 +525,40 @@ class CustomizableImage:
             OSError: If the file cannot be written.
         """
         with open_binary_write(filename) as file:
-            self._write_header(file)
-            for blocks in self._data.values():
-                self._write_blocks(file, blocks)
+            self._write(file)
+
+    def to_bytes(self) -> bytes:
+        """Return the container as the bytes :meth:`save` would write.
+
+        Coefficients are rounded and clipped to ``int16`` here as they are on
+        the way to a file, which is part of what the codec does to a picture:
+        reading the result back with :meth:`from_bytes` is a faithful decode,
+        where using the unrounded blocks still in memory would not be.
+
+        Returns:
+            The whole container.
+
+        Raises:
+            ValueError: If any channel has no description set.
+        """
+        buffer = io.BytesIO()
+        self._write(buffer)
+        return buffer.getvalue()
+
+    def _write(self, file: BinaryIO) -> None:
+        """Write the header and every channel's blocks to a stream.
+
+        Args:
+            file: Stream to write to.
+
+        Raises:
+            ValueError: If any channel has no description set.
+        """
+        descriptions = self._write_header(file)
+        for channel, blocks in self._data.items():
+            # Crop here as well as in set_data: a container that came from
+            # load() holds its blocks zero-padded back to full size, and
+            # writing those under a header that declares the packed size made
+            # a file eight times too large that decoded to noise (0.5.1).
+            packed = descriptions[channel].packed_block_size
+            self._write_blocks(file, blocks[:, :packed, :packed])

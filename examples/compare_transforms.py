@@ -1,6 +1,6 @@
 """Compare block transforms at the same geometry, through the whole pipeline.
 
-``Task(transform=...)`` swaps the transform and nothing else: the colour
+``Codec(transform=...)`` swaps the transform and nothing else: the colour
 conversion, the padding, the crop to the low-frequency corner and the ``.cim``
 container stay as they are. The file size depends only on the geometry, so
 every row of the table below is the same number of bytes and the dB columns
@@ -17,7 +17,7 @@ Needs numpy only. Run from the repository root::
 
 A file written with anything but the default transform is a ``.cim`` in name
 only: the container does not record the transform, so it must be extracted by
-a ``Task`` given the same one. This script keeps its files in a temporary
+a ``Codec`` given the same one. This script keeps its files in a temporary
 directory for that reason.
 """
 
@@ -31,7 +31,7 @@ from pathlib import Path
 import numpy as np
 import numpy.typing as npt
 
-from walsh import MatrixTransform, Task, Transform, reader_for
+from walsh import Codec, MatrixTransform, Transform, reader_for
 
 Block = npt.NDArray[np.float64]
 
@@ -58,7 +58,7 @@ class HartleyTransform(MatrixTransform):
         return self._matrix(size)
 
 
-#: Column heading -> what to hand ``Task(transform=...)``: a name or an instance.
+#: Column heading -> what to hand ``Codec(transform=...)``: a name or an instance.
 TRANSFORMS: dict[str, Transform | str] = {
     "Walsh-Hadamard": "walsh",
     "DCT-II": "dct",
@@ -84,11 +84,11 @@ def round_trip(
     compressed = workdir / "out.cim"
     restored = workdir / f"back{source.suffix}"
 
-    def task() -> Task:
-        return Task(packed_block_size=packed, transform=transform)
+    def codec() -> Codec:
+        return Codec(packed_block_size=packed, transform=transform)
 
-    task().with_action("compress").with_input(str(source)).with_output(str(compressed)).run()
-    task().with_action("extract").with_input(str(compressed)).with_output(str(restored)).run()
+    codec().compress(input=str(source), output=str(compressed)).run()
+    codec().extract(input=str(compressed), output=str(restored)).run()
     return psnr(pixels(source), pixels(restored)), compressed.stat().st_size
 
 

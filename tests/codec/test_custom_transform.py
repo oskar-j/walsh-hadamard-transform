@@ -1,4 +1,4 @@
-"""`Task(transform=...)`: another block transform through the same pipeline (#41)."""
+"""`Codec(transform=...)`: another block transform through the same pipeline (#41)."""
 
 from __future__ import annotations
 
@@ -14,9 +14,9 @@ from click.testing import CliRunner
 
 from conftest import write_ppm
 from walsh import (
+    Codec,
     DiscreteCosineTransform,
     HaarTransform,
-    Task,
     Transform,
     WalshHadamardTransform,
     reader_for,
@@ -37,7 +37,7 @@ def _dct_matrix(edge: int) -> Block:
 
 class Dct(Transform):
     """An orthonormal DCT-II that knows nothing of stacks: the minimum a
-    subclass has to write, so Task reaches it through the per-block defaults."""
+    subclass has to write, so Codec reaches it through the per-block defaults."""
 
     def transform(self, src: Block) -> Block:
         m = _dct_matrix(src.shape[-1])
@@ -83,13 +83,13 @@ def _psnr(original: Path, restored: Path) -> float:
     return float(10 * np.log10(255.0**2 / mse))
 
 
-def _compress(task: Task, source: Path, output: Path) -> bytes:
-    task.with_action("compress").with_input(str(source)).with_output(str(output)).run()
+def _compress(codec: Codec, source: Path, output: Path) -> bytes:
+    codec.compress(input=str(source), output=str(output)).run()
     return output.read_bytes()
 
 
-def _extract(task: Task, source: Path, output: Path) -> Path:
-    task.with_action("extract").with_input(str(source)).with_output(str(output)).run()
+def _extract(codec: Codec, source: Path, output: Path) -> Path:
+    codec.extract(input=str(source), output=str(output)).run()
     return output
 
 
@@ -97,8 +97,8 @@ def _extract(task: Task, source: Path, output: Path) -> Path:
 def test_a_custom_transform_round_trips_through_the_whole_pipeline(
     transform: Transform, picture: Path, tmp_path: Path
 ) -> None:
-    _compress(Task(transform=transform), picture, tmp_path / "dct.cim")
-    restored = _extract(Task(transform=transform), tmp_path / "dct.cim", tmp_path / "back.ppm")
+    _compress(Codec(transform=transform), picture, tmp_path / "dct.cim")
+    restored = _extract(Codec(transform=transform), tmp_path / "dct.cim", tmp_path / "back.ppm")
     assert _psnr(picture, restored) > 35
 
 
@@ -117,8 +117,8 @@ def test_the_transform_changes_the_coefficients_and_nothing_else(
     picture: Path, tmp_path: Path
 ) -> None:
     """Same header, same size (it depends on the geometry alone), other payload."""
-    walsh_bytes = _compress(Task(), picture, tmp_path / "walsh.cim")
-    dct_bytes = _compress(Task(transform=Dct()), picture, tmp_path / "dct.cim")
+    walsh_bytes = _compress(Codec(), picture, tmp_path / "walsh.cim")
+    dct_bytes = _compress(Codec(transform=Dct()), picture, tmp_path / "dct.cim")
     assert dct_bytes[:HEADER] == walsh_bytes[:HEADER]
     assert len(dct_bytes) == len(walsh_bytes)
     assert dct_bytes[HEADER:] != walsh_bytes[HEADER:]
@@ -127,45 +127,45 @@ def test_the_transform_changes_the_coefficients_and_nothing_else(
 def test_a_cim_does_not_record_its_transform(picture: Path, tmp_path: Path) -> None:
     """The documented caveat, pinned: the default decodes a DCT file without
     complaint, into a visibly worse picture than the right transform gives."""
-    _compress(Task(transform=Dct()), picture, tmp_path / "dct.cim")
-    right = _extract(Task(transform=Dct()), tmp_path / "dct.cim", tmp_path / "right.ppm")
-    wrong = _extract(Task(), tmp_path / "dct.cim", tmp_path / "wrong.ppm")
+    _compress(Codec(transform=Dct()), picture, tmp_path / "dct.cim")
+    right = _extract(Codec(transform=Dct()), tmp_path / "dct.cim", tmp_path / "right.ppm")
+    wrong = _extract(Codec(), tmp_path / "dct.cim", tmp_path / "wrong.ppm")
     assert _psnr(picture, right) - _psnr(picture, wrong) > 6
 
 
 def test_passing_the_default_explicitly_changes_nothing(picture: Path, tmp_path: Path) -> None:
-    implicit = _compress(Task(), picture, tmp_path / "implicit.cim")
+    implicit = _compress(Codec(), picture, tmp_path / "implicit.cim")
     explicit = _compress(
-        Task(transform=WalshHadamardTransform()), picture, tmp_path / "explicit.cim"
+        Codec(transform=WalshHadamardTransform()), picture, tmp_path / "explicit.cim"
     )
     assert implicit == explicit
-    back_implicit = _extract(Task(), tmp_path / "implicit.cim", tmp_path / "a.ppm")
+    back_implicit = _extract(Codec(), tmp_path / "implicit.cim", tmp_path / "a.ppm")
     back_explicit = _extract(
-        Task(transform=WalshHadamardTransform()), tmp_path / "implicit.cim", tmp_path / "b.ppm"
+        Codec(transform=WalshHadamardTransform()), tmp_path / "implicit.cim", tmp_path / "b.ppm"
     )
     assert back_implicit.read_bytes() == back_explicit.read_bytes()
 
 
-def test_coeff_removal_by_the_task_equals_coeff_removal_by_the_transform(
+def test_coeff_removal_by_the_codec_equals_coeff_removal_by_the_transform(
     picture: Path, tmp_path: Path
 ) -> None:
-    """Task applies the threshold itself now; the built-in class still can.
+    """Codec applies the threshold itself now; the built-in class still can.
     The two routes must write the same bytes."""
-    by_task = _compress(Task().with_coeff_removal(20.0), picture, tmp_path / "task.cim")
+    by_codec = _compress(Codec().with_coeff_removal(20.0), picture, tmp_path / "codec.cim")
     by_transform = _compress(
-        Task(transform=WalshHadamardTransform(coeff=20.0)), picture, tmp_path / "transform.cim"
+        Codec(transform=WalshHadamardTransform(coeff=20.0)), picture, tmp_path / "transform.cim"
     )
-    assert by_task == by_transform
-    assert by_task != _compress(Task(), picture, tmp_path / "plain.cim")
+    assert by_codec == by_transform
+    assert by_codec != _compress(Codec(), picture, tmp_path / "plain.cim")
 
 
 def test_coeff_removal_works_for_a_custom_transform(picture: Path, tmp_path: Path) -> None:
     def zeros(payload: bytes) -> int:
         return int((np.frombuffer(payload[HEADER:], dtype="<i2") == 0).sum())
 
-    plain = _compress(Task(transform=Dct()), picture, tmp_path / "plain.cim")
+    plain = _compress(Codec(transform=Dct()), picture, tmp_path / "plain.cim")
     thinned = _compress(
-        Task(transform=Dct()).with_coeff_removal(50.0), picture, tmp_path / "thinned.cim"
+        Codec(transform=Dct()).with_coeff_removal(50.0), picture, tmp_path / "thinned.cim"
     )
     assert zeros(thinned) > zeros(plain)
     coefficients = np.frombuffer(thinned[HEADER:], dtype="<i2")
@@ -181,13 +181,13 @@ def test_anything_but_a_transform_instance_is_rejected_at_construction(
     not_a_transform: Any,
 ) -> None:
     with pytest.raises(TypeError, match="must be a Transform instance"):
-        Task(transform=not_a_transform)
+        Codec(transform=not_a_transform)
 
 
 def test_negative_coeff_removal_is_rejected_when_it_is_set() -> None:
     with pytest.raises(ValueError, match="non-negative"):
-        Task().with_coeff_removal(-1.0)
-    Task().with_coeff_removal(0.0).with_coeff_removal(None)
+        Codec().with_coeff_removal(-1.0)
+    Codec().with_coeff_removal(0.0).with_coeff_removal(None)
 
 
 class _Shrinks(Dct):
@@ -208,7 +208,7 @@ def test_a_block_that_comes_back_another_shape_is_rejected_by_name(
     """A scalar would broadcast over the block without the explicit check."""
     output = tmp_path / "out.cim"
     with pytest.raises(ValueError, match=rf"{type(transform).__name__}\.transform returned shape"):
-        _compress(Task(transform=transform), picture, output)
+        _compress(Codec(transform=transform), picture, output)
     assert not output.exists()
 
 
@@ -224,11 +224,11 @@ def test_a_stack_override_that_changes_the_shape_is_rejected_by_name(
             return super().inverse_transform_stack(stack)[:, :4, :4]
 
     with pytest.raises(ValueError, match=r"BadForward\.transform_stack returned shape"):
-        _compress(Task(transform=BadForward()), picture, tmp_path / "bad.cim")
+        _compress(Codec(transform=BadForward()), picture, tmp_path / "bad.cim")
 
-    _compress(Task(transform=BadInverse()), picture, tmp_path / "good.cim")
+    _compress(Codec(transform=BadInverse()), picture, tmp_path / "good.cim")
     with pytest.raises(ValueError, match=r"BadInverse\.inverse_transform_stack returned shape"):
-        _extract(Task(transform=BadInverse()), tmp_path / "good.cim", tmp_path / "back.ppm")
+        _extract(Codec(transform=BadInverse()), tmp_path / "good.cim", tmp_path / "back.ppm")
     assert not (tmp_path / "back.ppm").exists()
 
 
@@ -328,8 +328,8 @@ def test_the_comparison_example_runs_and_its_transforms_are_orthonormal(
 
 def _round_trip_psnr(transform: Transform | str, packed: int, picture: Path, tmp: Path) -> float:
     cim, back = tmp / f"{packed}.cim", tmp / f"{packed}.ppm"
-    _compress(Task(transform=transform, packed_block_size=packed), picture, cim)
-    _extract(Task(transform=transform, packed_block_size=packed), cim, back)
+    _compress(Codec(transform=transform, packed_block_size=packed), picture, cim)
+    _extract(Codec(transform=transform, packed_block_size=packed), cim, back)
     return _psnr(picture, back)
 
 
@@ -346,26 +346,26 @@ def _round_trip_psnr(transform: Transform | str, packed: int, picture: Path, tmp
 def test_a_name_means_an_instance_of_that_transform(
     name: str, transform_class: type[Transform], picture: Path, tmp_path: Path
 ) -> None:
-    by_name = _compress(Task(transform=name), picture, tmp_path / "name.cim")
-    by_instance = _compress(Task(transform=transform_class()), picture, tmp_path / "instance.cim")
+    by_name = _compress(Codec(transform=name), picture, tmp_path / "name.cim")
+    by_instance = _compress(Codec(transform=transform_class()), picture, tmp_path / "instance.cim")
     assert by_name == by_instance
 
-    back_by_name = _extract(Task(transform=name), tmp_path / "name.cim", tmp_path / "a.ppm")
+    back_by_name = _extract(Codec(transform=name), tmp_path / "name.cim", tmp_path / "a.ppm")
     back_by_instance = _extract(
-        Task(transform=transform_class()), tmp_path / "name.cim", tmp_path / "b.ppm"
+        Codec(transform=transform_class()), tmp_path / "name.cim", tmp_path / "b.ppm"
     )
     assert back_by_name.read_bytes() == back_by_instance.read_bytes()
 
 
 def test_the_name_walsh_is_the_default(picture: Path, tmp_path: Path) -> None:
-    assert _compress(Task(transform="walsh"), picture, tmp_path / "named.cim") == _compress(
-        Task(), picture, tmp_path / "default.cim"
+    assert _compress(Codec(transform="walsh"), picture, tmp_path / "named.cim") == _compress(
+        Codec(), picture, tmp_path / "default.cim"
     )
 
 
 def test_an_unknown_name_is_rejected_at_construction_with_the_known_ones() -> None:
     with pytest.raises(ValueError, match=r"unknown transform 'fourier'.*dct, haar, walsh"):
-        Task(transform="fourier")
+        Codec(transform="fourier")
 
 
 def test_every_named_transform_round_trips_and_the_dct_wins_on_a_smooth_picture(
@@ -393,9 +393,9 @@ def test_haar_ties_walsh_at_a_power_of_two_and_only_there(picture: Path, tmp_pat
 
 
 def test_coeff_removal_works_for_a_named_transform(picture: Path, tmp_path: Path) -> None:
-    plain = _compress(Task(transform="haar"), picture, tmp_path / "plain.cim")
+    plain = _compress(Codec(transform="haar"), picture, tmp_path / "plain.cim")
     thinned = _compress(
-        Task(transform="haar").with_coeff_removal(50.0), picture, tmp_path / "thinned.cim"
+        Codec(transform="haar").with_coeff_removal(50.0), picture, tmp_path / "thinned.cim"
     )
     assert (np.frombuffer(thinned[HEADER:], dtype="<i2") == 0).sum() > (
         np.frombuffer(plain[HEADER:], dtype="<i2") == 0

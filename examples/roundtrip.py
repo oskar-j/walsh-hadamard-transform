@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
 
-from walsh import Task
+from walsh import Codec
 
 DATA = Path(__file__).resolve().parent.parent / "data"
 SOURCE = DATA / "bmp" / "image.bmp"
@@ -25,9 +25,9 @@ RESTORED = DATA / "bmp" / "recreated.bmp"
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
-    Task().with_action("compress").with_input(str(SOURCE)).with_output(str(COMPRESSED)).run()
+    Codec().compress(input=str(SOURCE), output=str(COMPRESSED)).run()
 
-    Task().with_action("extract").with_input(str(COMPRESSED)).with_output(str(RESTORED)).run()
+    Codec().extract(input=str(COMPRESSED), output=str(RESTORED)).run()
 
     original_bytes = SOURCE.stat().st_size
     compressed_bytes = COMPRESSED.stat().st_size
