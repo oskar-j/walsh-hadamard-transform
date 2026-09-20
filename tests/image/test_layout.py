@@ -30,6 +30,8 @@ FORMAT_CLASSES = (
         "from walsh import BMPImage, PickleImage, PNGImage",
         "from walsh import Action, Codec",
         "from walsh.codec import Action, Codec",
+        "from walsh import CompressionStats, Vectorizer",
+        "from walsh.vectorizer import Vectorizer",
         "from walsh.image import BMPImage, TIFFImage, PPMImage, PAMImage, NPYImage, PickleImage",
         "from walsh.image import PNG_SIGNATURE, PNGImage",
         "from walsh.image.raster import BMPImage, PNGImage, TIFFImage",

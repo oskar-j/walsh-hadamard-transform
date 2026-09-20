@@ -72,7 +72,57 @@ Release notes.
   writes the reconstruction, and another file type is an `Error:` line with
   the same message, not a traceback.
 - `CustomizableImage.to_bytes()` and `CustomizableImage.from_bytes()`: `save`
-  and `load` against memory, sharing their code.
+  and `load` against memory, sharing their code. Also `get_descriptions()`
+  and `HEADER_SIZE`.
+- **`Vectorizer`: a picture as the coefficient vectors the codec keeps of it.**
+  `Codec` goes from file to file; this stops in the middle and hands the
+  numbers over:
+
+  ```python
+  vectorizer = Vectorizer(transform="walsh").parse(file_name="earth.png").compute()
+  vectorizer.vectors  # int16, shape (3750, 16)
+  print(vectorizer.describe())  # sizes, reduction, bits per pixel, PSNR
+  vectorizer.save(output_file_name="earth.cim")
+  ```
+
+  `parse()` reads a picture in any supported format and `compute()`
+  transforms it; `load()` reads a `.cim`, which already is vectors.
+  `vectors` (the same object as `_vectors`) is one `int16` array with a row
+  per block, luma first, then Cb, then Cr: every channel keeps the same
+  number of coefficients per block, so they fit one array, in the file's own
+  order and dtype. `vectors.tobytes()` is the `.cim` after its 26-byte
+  header, and `save()` writes byte for byte what `Codec().compress()` does.
+- `describe()` returns a `CompressionStats`: dimensions, block geometry,
+  vector counts per channel, coefficients stored and non-zero, raw, source
+  and compressed sizes, the reduction against each in percent, bits per
+  pixel, and PSNR with its mean squared error and largest error. `print()`
+  gives an aligned table. On `earth.ppm` it reports 25.07 dB and 75.0%,
+  the figures in `data/README.md`. After `load()` there is no original, so
+  the PSNR is `None` and the table says why.
+- **The vectors are the object's state, not a copy.** Write into them and
+  `describe()`, `reconstruct()` and `save()` follow, so an experiment is two
+  lines: `vectors[:, 1:] = 0` keeps each block's mean, and the PSNR of the
+  sample falls from 25.07 to 19.37 dB. Replacing `_vectors` by something of
+  another shape or dtype is a `ValueError` at the next use, naming both.
+- `reconstruct()` returns the picture the vectors decode to, as an array.
+  `save()` refuses a picture suffix, since a `.cim` under a picture's name
+  opens in nothing, and `parse()` sends a `.cim` to `load()`.
+- `Codec.encode(pixels)` and `Codec.decode(container)`: the in-memory halves
+  of `compress` and `extract`, an array in and a container out and the
+  reverse, which is what `Vectorizer` is built on. `decode` puts the
+  container through its bytes whatever its origin, so every route to a
+  picture agrees. `Codec.transform` reads back the transform in use, and
+  `PixelArray` is exported from `walsh.image`.
+
+### Fixed
+
+- **A `.cim` that was loaded could not be saved again.** A loaded container
+  holds its blocks zero-padded back to full size, and `save()` wrote those
+  under a header that still declared the packed size: 960,026 bytes for a
+  120,026-byte file, which then decoded to noise. Nothing in the codec saved
+  a container it had loaded, so nothing noticed; `Vectorizer.load()` followed
+  by `save()` would have. Blocks are now cropped to their packed corner on
+  every write, not only in `set_data`.
 
 Codec output is unchanged: every checked-in file is still reproduced exactly.
 

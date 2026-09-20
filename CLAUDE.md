@@ -68,7 +68,7 @@ src/walsh/image/            tests/
   raster/      bmp, png, tiff   netpbm/          test_ppm, test_pam
   netpbm/      ppm, pam,        arrays/          test_npy, test_pickle
                _samples       codec/             test_codec, test_direct,
-  arrays/      npy, pkl,                         test_transforms,
+  arrays/      npy, pkl,                         test_vectorizer, test_transforms,
                _rules                            test_custom_transform,
                                                  test_colors, test_golden
                               cli/               test_cli
@@ -125,23 +125,25 @@ when an older changelog entry names something that no longer exists. The
 parameter is called `input` on purpose, builtin or not. The plan is recorded
 as an `Action` and dispatched through the `Codec._ACTIONS` ClassVar to the
 private `_compress` / `_extract`; adding an action means a public planning
-method, a private pipeline *and* an entry there. The pipelines are two
-halves, `_encode` (picture in, `CustomizableImage` out) and `_decode`
-(container in, picture out), and `_compress` / `_extract` are compositions of
-them.
+method, a private pipeline *and* an entry there. The arithmetic is two
+public, in-memory halves, `encode(pixels)` (array in, `CustomizableImage`
+out) and `decode(container)` (container in, array out), which run at once;
+`_read_picture` and `_write_picture` are the file ends, and `_compress` /
+`_extract` are compositions of the four. `transform` reads back the
+transform in use.
 
 **`compress` with a picture as its output skips the `.cim` file** (0.5.1):
 `Codec().compress(input="a.ppm", output="a_compressed.ppm")` writes the lossy
 reconstruction. What decides is `_writes_a_picture`: a suffix in `SUFFIXES`
 means a picture, and anything else (`.cim`, another suffix, none, stdout) the
 container, as before. The container still goes through its bytes, in memory:
-`_decode(CustomizableImage.from_bytes(container.to_bytes()))`. Do not
-"optimise" that into handing `_decode` the container `_encode` returned. The
-one in hand holds *unrounded* blocks *cropped* to the packed corner, while a
-decoder is owed what a file gives it, `int16`-rounded, clipped and zero-padded
-to full blocks; going through `_write` / `_read`, the code `save` / `load`
-use, is what makes the direct output identical to the two-step one by
-construction, and `test_golden.py` holds it to the checked-in `recreated.*`
+`decode` starts with `CustomizableImage.from_bytes(container.to_bytes())`,
+whatever the container's origin. Do not "optimise" that away. A container
+fresh from `encode` holds *unrounded* blocks *cropped* to the packed corner,
+while a decoder is owed what a file gives it, `int16`-rounded, clipped and
+zero-padded to full blocks; going through `_write` / `_read`, the code `save`
+/ `load` use, is what makes every route to a picture identical to the
+two-step one by construction, and `test_golden.py` holds it to the checked-in `recreated.*`
 files byte for byte (PNG by pixels). **The output must be the input's file
 type for now**: anything else is a `NotImplementedError` raised by
 `compress()` itself, before anything is read and leaving the codec unchanged,
@@ -156,6 +158,36 @@ line through `_REPORTED` in `cli.py`, which adds `NotImplementedError` to
 `EXPECTED_ERRORS` for the command line only: in a library it can also mean
 broken code (an abstract `Transform` method), which should keep its
 traceback. Take it out of `_REPORTED` when nothing raises it.
+
+**`vectorizer.py`** (0.5.1) — `Vectorizer` is the maintainer's design: the
+codec stopped in the middle, where the picture is numbers.
+`parse(file_name=)` reads a picture and `compute()` transforms it;
+`load(file_name=)` reads a `.cim`, which already is vectors, so `compute()`
+then does nothing (on purpose: there is no picture to compute from, and a
+caller's generic parse-or-load pipeline should not have to branch).
+`describe()` returns a frozen `CompressionStats` whose `__str__` is the
+table; `reconstruct()` and `save(output_file_name=)` complete it. It *has* a
+`Codec` and uses only its public `encode` / `decode` / `transform`. **The
+vectors are one `int16` array of shape `(blocks, packed ** 2)`**, luma rows
+first, then Cb, then Cr, each row-major: one array is possible only because
+every channel keeps the same `packed_block_size`, and it is the `.cim`'s own
+order and dtype, so `vectors.tobytes()` is the file after
+`CustomizableImage.HEADER_SIZE` (26) bytes. `_take` gets them by putting the
+container through `to_bytes()`, so they are the rounded values a file would
+hold. A hand-made `.cim` whose channels keep different amounts is refused by
+name, since it has vectors of two lengths. **The vectors are the state, not a
+copy**: the maintainer asked for `_vectors` to be the raw numpy object, so it
+is one attribute, `vectors` is a property returning the same array, and
+`describe` / `reconstruct` / `save` all rebuild the container from it through
+`_container()`. Because `_vectors` can be *replaced* as well as written into,
+`_checked()` verifies dtype and shape at every use; keep every reader going
+through it. PSNR needs the parsed picture, so after `load()` it is `None`
+and the table says why; `_forget()` runs after a successful read, never
+before, so a failed `parse` leaves the previous state intact. `save()`
+refuses a picture suffix (a `.cim` under a picture's name opens in nothing)
+and `parse()` sends a `.cim` to `load()`. The README's example output and its
+19.37 dB figure are from a real run on `data/png/earth.png`; rerun it if the
+codec changes.
 
 Block sizes are constructor kwargs defaulting to the original values (Y 8,
 chroma 16, packed 4), and
@@ -220,7 +252,13 @@ inconsistent by design. `CustomizableImage` is deliberately not a
 `RasterImage`; it holds each channel as one `(count, edge, edge)` stack,
 `get_stack(channel)` is the array form, and `get_y_data()` and friends return
 views into it. `to_bytes()` / `from_bytes()` (0.5.1) are `save` / `load`
-against memory, sharing `_write` / `_read` with them. `bmp.py` converts both
+against memory, sharing `_write` / `_read` with them. **`_write` crops every
+block to its packed corner, as `set_data` does** (0.5.1): a container that
+came from `load()` holds blocks zero-padded to full size, and until then
+`save()` wrote those under a header declaring the packed size, eight times
+too large and decoding to noise. Nothing saved a loaded container before
+`Vectorizer`, so nothing noticed. `get_descriptions()` and `HEADER_SIZE`
+date from the same release. `bmp.py` converts both
 ways (BMP is blue-green-red and
 bottom-up, two reversed views); `png.py`, `ppm.py`, `pam.py`, `tiff.py` and
 `npy.py` need no conversion.
@@ -659,6 +697,8 @@ name `Codec` (in `walsh/codec.py`) and the `compress(input=, output=)` /
 `extract(input=, output=)` calls, both breaking changes made on purpose and
 mapped from the old spellings in the CHANGELOG, and let
 `compress` write the reconstruction straight to a picture of the input's
-type, skipping the `.cim` file; other types are #51, for 0.6.0.
+type, skipping the `.cim` file; other types are #51, for 0.6.0. It also
+added `Vectorizer`, a picture as its coefficient vectors with statistics, and
+fixed the saving of a loaded `.cim`.
 Partially based on
 https://github.com/ktisha/python2012/tree/dee4beda8e22f3a66a3e31384d4b72ab66102e88/avereshchagin

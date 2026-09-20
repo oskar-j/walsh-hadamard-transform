@@ -33,6 +33,7 @@ to race it against, and more than seven hundred tests keep all of it honest.
   - [Reading the PSNR figures](#reading-the-psnr-figures)
   - [As a library](#as-a-library)
     - [Skipping the `.cim` file](#skipping-the-cim-file)
+    - [Looking at the vectors](#looking-at-the-vectors)
     - [Other transforms](#other-transforms)
     - [Writing your own](#writing-your-own)
   - [Examples](#examples)
@@ -329,6 +330,66 @@ Codec().extract(input="earth.cim", output="earth.png").run()
 ```
 
 Suffixes that name one format, such as `.tif` and `.tiff`, are one type.
+
+#### Looking at the vectors
+
+`Codec` goes from one file to another. `Vectorizer` stops in the middle, where
+the picture is a table of numbers, and hands you the table:
+
+```python
+from walsh import Vectorizer
+
+vectorizer = Vectorizer(transform="walsh").parse(file_name="data/png/earth.png").compute()
+
+vectorizer.vectors  # int16, shape (3750, 16): one row per block
+print(vectorizer.describe())
+vectorizer.save(output_file_name="earth.cim")
+```
+
+```
+picture       400 x 400
+transform     WalshHadamardTransform
+blocks        Y 8, Cb 16, Cr 16; 4 x 4 kept of each
+vectors       3,750 of 16 (Y 2,500, Cb 625, Cr 625)
+coefficients  60,000, 12.50% of the picture's samples; 48,122 non-zero (80.2%)
+raw pixels    480,000 B
+source file   301,514 B
+compressed    120,026 B, 6.00 bits per pixel
+reduction     75.0% smaller than the raw pixels, 60.2% smaller than the source file
+PSNR          25.07 dB (mean squared error 202.13, largest error 143 of 255)
+```
+
+Each block of the picture becomes one vector: the coefficients the codec keeps
+of it, low frequencies first. Every channel keeps the same number per block, so
+they all fit one array, the luma blocks first, then Cb, then Cr. That is the
+order of the `.cim` file, and the array is `int16` because the file is, so
+`vectors.tobytes()` is exactly the file after its 26-byte header, and `save()`
+writes the very `.cim` that `Codec().compress()` would.
+
+| Call | What it does |
+| --- | --- |
+| `parse(file_name=...)` | Reads a picture in any supported format. `width=` and `height=` declare the size of a flat pickled list. |
+| `load(file_name=...)` | Reads a `.cim`, which already is vectors, so nothing is left to compute. |
+| `compute()` | Transforms the parsed picture into vectors. |
+| `vectors` | The array itself, also reachable as `_vectors`. It is the object's state, not a copy. |
+| `describe()` | Sizes, reduction, bits per pixel and PSNR, as a `CompressionStats`; `print()` it for the table above, or read its fields. |
+| `reconstruct()` | The picture the vectors decode to, as a `(height, width, 3)` array. |
+| `save(output_file_name=...)` | Writes the `.cim`. |
+
+Because the vectors are the state, changing them changes everything after
+them, which makes this a bench for experiments. Keep only each block's mean and
+see what that costs:
+
+```python
+vectorizer.vectors[:, 1:] = 0
+print(vectorizer.describe().psnr_db)  # 25.07 before, 19.37 now
+vectorizer.save(output_file_name="earth_means.cim")
+```
+
+After `load()` there is no original picture to compare with, so `describe()`
+reports no PSNR; and since a `.cim` does not record its transform,
+`reconstruct()` inverts with whichever transform the `Vectorizer` was given.
+The constructor takes what `Codec` takes, plus `coeff_removal=`.
 
 #### Other transforms
 

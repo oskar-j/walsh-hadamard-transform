@@ -20,7 +20,7 @@ from walsh.exceptions import UnsupportedFileFormatError
 from walsh.image._io import FileSource, align, open_binary, open_binary_read, open_binary_write
 from walsh.image.arrays.npy import NPY_CHANNELS, NPY_DTYPE, NPYImage
 from walsh.image.arrays.pkl import PICKLE_PROTOCOL, PickleImage, pixels_from_object, safe_loads
-from walsh.image.base import Pixel, RasterImage
+from walsh.image.base import Pixel, PixelArray, RasterImage
 from walsh.image.cim import (
     COEFF_DTYPE,
     MAX_BLOCK_SIZE,
@@ -73,6 +73,7 @@ __all__ = [
     "PPMImage",
     "PickleImage",
     "Pixel",
+    "PixelArray",
     "RasterImage",
     "TIFFImage",
     "UnsupportedFileFormatError",

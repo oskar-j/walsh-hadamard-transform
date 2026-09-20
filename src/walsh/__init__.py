@@ -39,6 +39,7 @@ from walsh.transforms import (
     WalshHadamardTransform,
     transform_for,
 )
+from walsh.vectorizer import CompressionStats, Vectorizer
 
 try:
     __version__ = version("walsh")
@@ -51,6 +52,7 @@ __all__ = [
     "BlockDescription",
     "Codec",
     "ColorModel",
+    "CompressionStats",
     "CustomizableImage",
     "DiscreteCosineTransform",
     "HaarTransform",
@@ -65,6 +67,7 @@ __all__ = [
     "TIFFImage",
     "Transform",
     "UnsupportedFileFormatError",
+    "Vectorizer",
     "WalshError",
     "WalshHadamardTransform",
     "YCbCrColorModel",

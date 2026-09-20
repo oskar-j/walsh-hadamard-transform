@@ -712,3 +712,68 @@ def test_coeff_removal_leaves_fewer_coefficients_the_higher_it_is(
     survivors = _stored_coefficients(outputs[500.0])
     survivors = survivors[survivors != 0]
     assert np.all(np.abs(survivors) >= 500), "every survivor is at or above the threshold"
+
+
+# --- the in-memory halves (0.5.1) ---------------------------------------------
+
+
+def _array(path: Path) -> np.ndarray:
+    image = reader_for(path)
+    image.load(str(path))
+    return image.get_array()
+
+
+def test_encode_and_decode_are_compress_and_extract_without_the_files(
+    gradient_ppm: Path, tmp_path: Path
+) -> None:
+    """An array in and a container out, and the reverse. Together they give
+    the picture the two files give, byte for byte."""
+    codec = Codec(packed_block_size=3)
+    container = codec.encode(_array(gradient_ppm))
+
+    compressed = tmp_path / "c.cim"
+    codec.compress(input=str(gradient_ppm), output=str(compressed)).run()
+    assert container.to_bytes() == compressed.read_bytes()
+
+    restored = tmp_path / "r.ppm"
+    codec.extract(input=str(compressed), output=str(restored)).run()
+    decoded = codec.decode(container)
+    assert decoded.dtype == np.uint8
+    assert np.array_equal(decoded, _array(restored))
+
+
+def test_decode_takes_a_container_from_anywhere(gradient_ppm: Path, tmp_path: Path) -> None:
+    """Fresh from encode() the blocks are unrounded and cropped; from a file
+    they are rounded and padded. decode() owes both the same picture."""
+    from walsh.image import CustomizableImage
+
+    codec = Codec()
+    compressed = tmp_path / "c.cim"
+    codec.compress(input=str(gradient_ppm), output=str(compressed)).run()
+
+    fresh = codec.encode(_array(gradient_ppm))
+    loaded = CustomizableImage.load(str(compressed))
+    assert np.array_equal(codec.decode(fresh), codec.decode(loaded))
+
+
+@pytest.mark.parametrize(
+    ("pixels", "found"),
+    [
+        (np.zeros((4, 4, 3), dtype=np.float64), r"float64 \(4, 4, 3\)"),
+        (np.zeros((4, 4), dtype=np.uint8), r"uint8 \(4, 4\)"),
+        (np.zeros((4, 4, 4), dtype=np.uint8), r"uint8 \(4, 4, 4\)"),
+    ],
+    ids=["floats", "greyscale", "rgba"],
+)
+def test_encode_checks_the_array_and_does_not_cast_it(pixels: np.ndarray, found: str) -> None:
+    with pytest.raises(ValueError, match=rf"uint8 shaped \(height, width, 3\), got {found}"):
+        Codec().encode(pixels)
+
+
+def test_the_transform_in_use_can_be_read_back() -> None:
+    from walsh import HaarTransform, WalshHadamardTransform
+
+    assert isinstance(Codec().transform, WalshHadamardTransform)
+    assert isinstance(Codec(transform="haar").transform, HaarTransform)
+    mine = HaarTransform()
+    assert Codec(transform=mine).transform is mine

@@ -34,6 +34,7 @@ from walsh.image import (
     BlockDescription,
     CustomizableImage,
     FileSource,
+    PixelArray,
     blocks_for,
     reader_for,
 )
@@ -148,6 +149,15 @@ class Codec:
         self._cb_block_size = cb_block_size
         self._cr_block_size = cr_block_size
         self._packed_block_size = packed_block_size
+
+    @property
+    def transform(self) -> Transform:
+        """The block transform both directions run.
+
+        Returns:
+            The instance the constructor resolved, never a name.
+        """
+        return self._transform
 
     @staticmethod
     def _resolve_transform(transform: Transform | str | None) -> Transform:
@@ -541,20 +551,15 @@ class Codec:
 
     # -- pipelines -------------------------------------------------------
 
-    def _encode(self) -> CustomizableImage:
-        """Read the input picture and transform it into a spectral container.
-
-        The input format is chosen from the filename suffix.
+    def _read_picture(self) -> PixelArray:
+        """Read the input picture, its format chosen from the filename suffix.
 
         Returns:
-            The container, not yet written anywhere. Its blocks are cropped to
-            the packed corner but still unrounded: the rounding to ``int16``
-            happens on the way out of it, to a file or to bytes.
+            The pixels, ``(height, width, 3)`` RGB.
 
         Raises:
-            UnsupportedFileFormatError: If the input suffix is unknown, the
-                file is not valid for its format, or the image needs more
-                blocks than the ``.cim`` container can count.
+            UnsupportedFileFormatError: If the input suffix is unknown or the
+                file is not valid for its format.
             ValueError: If the picture is not the size that was declared.
             OSError: If the input cannot be opened.
         """
@@ -569,8 +574,39 @@ class Codec:
                 f"{self._input} is {width}x{height}, not the "
                 f"{self._input_size[0]}x{self._input_size[1]} declared"
             )
+        return source_image.get_array()
+
+    def encode(self, pixels: npt.ArrayLike) -> CustomizableImage:
+        """Transform a picture held in memory into a spectral container.
+
+        The in-memory half of :meth:`compress`: no file is read or written,
+        and it runs at once rather than on :meth:`run`.
+
+        Args:
+            pixels: ``uint8`` of shape ``(height, width, 3)``, RGB, top row
+                first.
+
+        Returns:
+            The container, not yet written anywhere. Its blocks are cropped to
+            the packed corner but still unrounded: the rounding to ``int16``
+            happens on the way out of it, to a file or to bytes.
+
+        Raises:
+            ValueError: If the array is not ``uint8`` of that shape. The dtype
+                is checked rather than cast, as ``RasterImage.set_array``
+                checks it, because a silent cast is how a float or a value
+                above 255 would become a wrong pixel with no error.
+            UnsupportedFileFormatError: If the image needs more blocks than
+                the ``.cim`` container can count.
+        """
+        array = np.asarray(pixels)
+        if array.dtype != np.uint8 or array.ndim != 3 or array.shape[2] != 3:
+            raise ValueError(
+                f"pixels must be uint8 shaped (height, width, 3), got {array.dtype} {array.shape}"
+            )
+        height, width = array.shape[:2]
         self._check_fits_the_container(width, height)
-        ycbcr = rgb_to_ycbcr(source_image.get_array().reshape(-1, 3))
+        ycbcr = rgb_to_ycbcr(array.reshape(-1, 3))
 
         blocks = {
             "y": self._slice(ycbcr[:, 0], width, height, self._y_block_size),
@@ -602,19 +638,32 @@ class Codec:
         customizable_image.set_data(spectral["y"], spectral["cb"], spectral["cr"])
         return customizable_image
 
-    def _decode(self, customizable_image: CustomizableImage) -> None:
-        """Invert the transform and write the picture to the output.
+    def decode(self, customizable_image: CustomizableImage) -> PixelArray:
+        """Invert the transform and return the picture a container holds.
 
-        The output format is chosen from the filename suffix.
+        The in-memory half of :meth:`extract`: no file is read or written,
+        and it runs at once rather than on :meth:`run`.
+
+        The container is first put through its own bytes, in memory, whatever
+        its origin. One fresh from :meth:`encode` holds unrounded blocks
+        cropped to their packed corner, while a decoder is owed what a file
+        would give it: ``int16`` coefficients, rounded and clipped,
+        zero-padded to full blocks. Going through the bytes, with the code
+        ``save`` and ``load`` use, is what makes every route to a picture
+        agree with compressing to a ``.cim`` and extracting that, by
+        construction, for a few hundred kilobytes of copying.
 
         Args:
-            customizable_image: A container as the reader hands it over, its
-                blocks zero-padded back to full size.
+            customizable_image: The container to decode.
+
+        Returns:
+            The pixels, ``(height, width, 3)`` RGB ``uint8``.
 
         Raises:
-            UnsupportedFileFormatError: If the output suffix is unknown.
-            OSError: If the output cannot be written.
+            ValueError: If the container has no block descriptions, or the
+                transform returns a stack of another shape.
         """
+        customizable_image = CustomizableImage.from_bytes(customizable_image.to_bytes())
         width, height = customizable_image.get_dimensions()
 
         neutral = {"y": NEUTRAL_LUMA, "cb": NEUTRAL_CHROMA, "cr": NEUTRAL_CHROMA}
@@ -635,8 +684,18 @@ class Codec:
             planes[channel] = merged.reshape(-1)
 
         ycbcr = np.stack([planes["y"], planes["cb"], planes["cr"]], axis=1)
-        pixels = ycbcr_to_rgb(ycbcr).reshape(height, width, 3)
+        return ycbcr_to_rgb(ycbcr).reshape(height, width, 3)
 
+    def _write_picture(self, pixels: PixelArray) -> None:
+        """Write a picture to the output, its format chosen from the suffix.
+
+        Args:
+            pixels: ``(height, width, 3)`` RGB.
+
+        Raises:
+            UnsupportedFileFormatError: If the output suffix is unknown.
+            OSError: If the output cannot be written.
+        """
         output_image = reader_for(self._output)
         output_image.set_array(pixels)
         output_image.save(self._output)
@@ -644,13 +703,9 @@ class Codec:
     def _compress(self) -> None:
         """Run a compression: to a ``.cim``, or straight through to a picture.
 
-        With a picture as the output the container never reaches a disk, but
-        it is still serialised and parsed back, in memory. That is deliberate.
-        The container in hand holds unrounded blocks cropped to their packed
-        corner, while a decoder is owed what a file would give it: ``int16``
-        coefficients, rounded and clipped, zero-padded to full blocks. Going
-        through the bytes is what makes this output identical to the two-step
-        one by construction, for a few hundred kilobytes of copying.
+        With a picture as the output the container never reaches a disk;
+        :meth:`decode` still puts it through its bytes, in memory, which is
+        what makes this output identical to the two-step one.
 
         Raises:
             UnsupportedFileFormatError: If a suffix is unknown, the input is
@@ -660,9 +715,9 @@ class Codec:
             OSError: If either file cannot be opened.
         """
         log.info("compressing %s -> %s", self._input, self._output)
-        customizable_image = self._encode()
+        customizable_image = self.encode(self._read_picture())
         if self._writes_a_picture(self._output):
-            self._decode(CustomizableImage.from_bytes(customizable_image.to_bytes()))
+            self._write_picture(self.decode(customizable_image))
         else:
             customizable_image.save(self._output)
 
@@ -681,7 +736,7 @@ class Codec:
                 "an input size applies to compress only: a .cim records its own dimensions"
             )
         log.info("extracting %s -> %s", self._input, self._output)
-        self._decode(CustomizableImage.load(self._input))
+        self._write_picture(self.decode(CustomizableImage.load(self._input)))
 
     _ACTIONS: ClassVar[dict[Action, Callable[[Codec], None]]] = {
         Action.COMPRESS: _compress,

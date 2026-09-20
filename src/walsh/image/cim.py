@@ -95,6 +95,10 @@ class CustomizableImage:
     HEADER_FORMAT = "<II"
     DESCRIPTION_FORMAT = "<HHH"
 
+    #: Bytes before the first coefficient: the dimensions, then a description
+    #: for each of the three channels.
+    HEADER_SIZE = struct.calcsize(HEADER_FORMAT) + 3 * struct.calcsize(DESCRIPTION_FORMAT)
+
     def __init__(self) -> None:
         """Create an empty container with no descriptions and no blocks."""
         self._width = 0
@@ -351,6 +355,23 @@ class CustomizableImage:
         """
         return list(self._data["cr"])
 
+    def get_descriptions(self) -> dict[str, BlockDescription]:
+        """Return each channel's layout record.
+
+        Returns:
+            The descriptions keyed ``"y"``, ``"cb"``, ``"cr"``, in that order.
+
+        Raises:
+            ValueError: If :meth:`set_descriptions` has not been called, and
+                the container was not loaded from anywhere.
+        """
+        found: dict[str, BlockDescription] = {}
+        for channel, description in self._descriptions.items():
+            if description is None:
+                raise ValueError(f"no block description set for channel {channel!r}")
+            found[channel] = description
+        return found
+
     def get_dimensions(self) -> tuple[int, int]:
         """Return the dimensions of the picture these blocks encode.
 
@@ -465,14 +486,11 @@ class CustomizableImage:
         Raises:
             ValueError: If any channel has no description set.
         """
+        descriptions = self.get_descriptions()
         file.write(struct.pack(self.HEADER_FORMAT, self._width, self._height))
-        written: dict[str, BlockDescription] = {}
-        for channel, description in self._descriptions.items():
-            if description is None:
-                raise ValueError(f"no block description set for channel {channel!r}")
+        for description in descriptions.values():
             file.write(struct.pack(self.DESCRIPTION_FORMAT, *description))
-            written[channel] = description
-        return written
+        return descriptions
 
     @staticmethod
     def _write_blocks(file: BinaryIO, blocks: Block) -> None:
