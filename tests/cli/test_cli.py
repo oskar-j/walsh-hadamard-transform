@@ -420,23 +420,34 @@ def test_the_options_apply_to_a_picture_output_too(
     assert coarse.read_bytes() != plain.read_bytes()
 
 
-def test_a_picture_of_another_type_is_a_clean_error_that_names_the_release(
+def test_the_picture_written_may_be_another_format(
     runner: CliRunner, gradient_ppm: Path, tmp_path: Path
 ) -> None:
-    """NotImplementedError is not one of EXPECTED_ERRORS, so without its own
-    handler this would be a traceback."""
-    output = tmp_path / "crossed.png"
-    result = runner.invoke(main, ["compress", str(gradient_ppm), str(output)])
-    assert result.exit_code == 1
-    assert "Error:" in result.output
-    assert "planned for 0.6.0" in result.output and "issues/51" in result.output
-    assert "extract that to .png" in result.output
-    assert result.exception is None or isinstance(result.exception, SystemExit)
-    assert not output.exists()
+    """`walsh compress photo.ppm photo_lossy.bmp` (0.5.2, #51): what the two
+    commands write between them, crossing formats as extract always could."""
+    direct = tmp_path / "direct.bmp"
+    result = runner.invoke(main, ["compress", str(gradient_ppm), str(direct)])
+    assert result.exit_code == 0, result.output
+
+    container, expected = tmp_path / "two.cim", tmp_path / "two.bmp"
+    assert runner.invoke(main, ["compress", str(gradient_ppm), str(container)]).exit_code == 0
+    assert runner.invoke(main, ["extract", str(container), str(expected)]).exit_code == 0
+    assert direct.read_bytes() == expected.read_bytes()
+
+
+def test_a_picture_output_this_package_cannot_write_is_not_a_picture_output(
+    runner: CliRunner, gradient_ppm: Path, tmp_path: Path
+) -> None:
+    """Only a suffix this package writes means a picture. `.jpg` is not one,
+    so it gets the container, as any unknown name always has."""
+    container, odd = tmp_path / "ref.cim", tmp_path / "photo.jpg"
+    assert runner.invoke(main, ["compress", str(gradient_ppm), str(container)]).exit_code == 0
+    assert runner.invoke(main, ["compress", str(gradient_ppm), str(odd)]).exit_code == 0
+    assert odd.read_bytes() == container.read_bytes()
 
 
 def test_the_help_says_a_picture_can_be_the_output(runner: CliRunner) -> None:
     result = runner.invoke(main, ["compress", "--help"])
     text = " ".join(result.output.split())
     assert "the .cim file is skipped" in text
-    assert "A different picture type is not supported yet" in text
+    assert "It may be any supported format, whatever format INPUT is in" in text

@@ -125,6 +125,9 @@ jobs:
           # must write the same reconstruction as the two steps above.
           /tmp/smoke/bin/walsh compress data/ppm/earth.ppm /tmp/smoke-direct.ppm
           cmp data/ppm/recreated.ppm /tmp/smoke-direct.ppm
+          # ...in any pair of formats (0.5.2): the PNG in, a TIFF out.
+          /tmp/smoke/bin/walsh compress data/png/earth.png /tmp/smoke-direct.tiff
+          cmp data/tiff/recreated.tiff /tmp/smoke-direct.tiff
           # A PNG is a zlib stream, whose bytes may differ between zlib builds,
           # so the PNG written here is compared by the pixels it decodes to.
           /tmp/smoke/bin/walsh extract data/cim/transformed_earth.cim /tmp/smoke-earth.png

@@ -4,13 +4,15 @@
 
 What is written is the picture's lossy reconstruction, and the claim these
 tests hold it to is that it is exactly what compressing to a `.cim` and
-extracting that would have written. In 0.5.1 the output must be the file type
-of the input; anything else is a `NotImplementedError` that names 0.6.0.
+extracting that would have written. Since 0.5.2 (#51) the output may be any
+supported format, whatever the input is: 0.5.1 had required the two to match.
 """
 
 from __future__ import annotations
 
+import io
 import pickle
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
@@ -27,7 +29,6 @@ from conftest import (
     write_tiff,
 )
 from walsh import Codec, UnsupportedFileFormatError, reader_for
-from walsh.codec import CROSS_FORMAT_ISSUE
 
 WIDTH, HEIGHT = 40, 24
 
@@ -162,47 +163,46 @@ def test_a_declared_size_is_honoured_and_verified(tmp_path: Path) -> None:
     assert not (tmp_path / "wrong.ppm").exists()
 
 
-# --- one file type at a time, for now -----------------------------------------
+# --- any format in, any format out (#51) --------------------------------------
 
 
-@pytest.mark.parametrize(
-    ("source", "target"),
-    [(".ppm", ".png"), (".png", ".ppm"), (".bmp", ".tif"), (".npy", ".pkl"), (".pam", ".ppm")],
-)
-def test_another_file_type_is_not_implemented_yet(tmp_path: Path, source: str, target: str) -> None:
-    path = _source(tmp_path, source)
-    output = tmp_path / f"crossed{target}"
-    codec = Codec()
-    with pytest.raises(NotImplementedError) as caught:
-        codec.compress(input=str(path), output=str(output))
-
-    message = str(caught.value)
-    assert "planned for 0.6.0" in message
-    assert CROSS_FORMAT_ISSUE in message and CROSS_FORMAT_ISSUE.endswith("/issues/51")
-    assert f"compress to a .cim and extract that to {target}" in message
-    assert str(path) in message and str(output) in message
-
-    assert not output.exists()
-    with pytest.raises(ValueError, match="nothing to run"):
-        codec.run()  # the refused call left the codec as it was
-
-
-def test_the_route_the_message_recommends_works(tmp_path: Path) -> None:
-    source = _source(tmp_path, ".ppm")
-    crossed = _two_steps(Codec, source, tmp_path / "crossed.png")
-    same = tmp_path / "same.ppm"
-    Codec().compress(input=str(source), output=str(same)).run()
-    assert np.array_equal(_pixels(crossed), _pixels(same))
-
-
-@pytest.mark.parametrize(
-    ("source", "target"),
-    [(".tif", ".tiff"), (".ppm", ".pnm"), (".pkl", ".pickle"), (".ppm", ".PPM"), (".png", ".Png")],
-)
-def test_two_spellings_of_one_file_type_are_one_file_type(
+@pytest.mark.parametrize("target", sorted(WRITERS))
+@pytest.mark.parametrize("source", sorted(WRITERS))
+def test_every_format_can_be_written_from_every_other(
     tmp_path: Path, source: str, target: str
 ) -> None:
-    """The type is the reader class, so suffixes that share one do not cross."""
+    """All 49 ordered pairs, the seven same-type ones among them. The codec
+    works on pixels, which no format owns, so the pair must not matter: each
+    gives what the two-step route gives for that target."""
+    path = _source(tmp_path, source)
+    direct = tmp_path / f"direct{target}"
+    Codec().compress(input=str(path), output=str(direct)).run()
+
+    expected = _two_steps(Codec, path, tmp_path / f"expected{target}")
+    assert np.array_equal(_pixels(direct), _pixels(expected))
+    if target != ".png":  # a PNG is pinned by its pixels; see test_png.py
+        assert direct.read_bytes() == expected.read_bytes()
+
+
+def test_the_source_format_leaves_no_trace_in_the_output(tmp_path: Path) -> None:
+    """One picture in seven containers, each written straight to a PPM: seven
+    identical files. This is the contract test_codec.py states for the .cim,
+    carried through to the picture."""
+    outputs = set()
+    for suffix in sorted(WRITERS):
+        output = tmp_path / f"from{suffix.lstrip('.')}.ppm"
+        Codec().compress(input=str(_source(tmp_path, suffix)), output=str(output)).run()
+        outputs.add(output.read_bytes())
+    assert len(outputs) == 1
+
+
+@pytest.mark.parametrize(
+    ("source", "target"),
+    [(".tif", ".tiff"), (".ppm", ".pnm"), (".pkl", ".pickle"), (".ppm", ".PPM"), (".bmp", ".Png")],
+)
+def test_the_output_suffix_may_be_spelled_any_way_the_format_is(
+    tmp_path: Path, source: str, target: str
+) -> None:
     path = _source(tmp_path, source)
     output = tmp_path / f"respelled{target}"
     Codec().compress(input=str(path), output=str(output)).run()
@@ -211,16 +211,49 @@ def test_two_spellings_of_one_file_type_are_one_file_type(
     )
 
 
-def test_standard_input_counts_as_a_bmp() -> None:
+def test_a_declared_size_crosses_formats_too(tmp_path: Path) -> None:
+    """The one input that cannot say its size, written as something else."""
+    flat = tmp_path / "flat.pkl"
+    flat.write_bytes(pickle.dumps(_picture(), protocol=4))
+    output = tmp_path / "from_flat.png"
+    Codec().with_input_size(WIDTH, HEIGHT).compress(input=str(flat), output=str(output)).run()
+
+    expected = tmp_path / "expected.png"
+    Codec().compress(input=str(_source(tmp_path, ".ppm")), output=str(expected)).run()
+    assert np.array_equal(_pixels(output), _pixels(expected))
+
+    with pytest.raises(ValueError, match="declared"):
+        Codec().with_input_size(HEIGHT, WIDTH).compress(
+            input=str(_source(tmp_path, ".bmp")), output=str(tmp_path / "wrong.tif")
+        ).run()
+    assert not (tmp_path / "wrong.tif").exists()
+
+
+def test_standard_input_is_a_bmp_and_can_be_written_as_anything(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A stream has no suffix, and `reader_for(None)` has always meant BMP."""
-    Codec().compress(input=None, output="fine.bmp")
-    with pytest.raises(NotImplementedError, match=r"planned for 0\.6\.0"):
-        Codec().compress(input=None, output="crossed.ppm")
+    bmp = _source(tmp_path, ".bmp")
+    stream = io.BytesIO(bmp.read_bytes())
+    monkeypatch.setattr(sys, "stdin", type("Stdin", (), {"buffer": stream})())
+
+    output = tmp_path / "from_stdin.ppm"
+    Codec().compress(input=None, output=str(output)).run()
+    expected = _two_steps(Codec, bmp, tmp_path / "expected.ppm")
+    assert output.read_bytes() == expected.read_bytes()
 
 
-def test_an_input_this_package_cannot_read_is_refused_when_the_output_is_a_picture() -> None:
-    with pytest.raises(UnsupportedFileFormatError, match=r"unsupported image format '\.jpg'"):
-        Codec().compress(input="photo.jpg", output="photo_compressed.ppm")
+def test_compress_only_plans_so_a_bad_name_is_reported_by_run(tmp_path: Path) -> None:
+    """compress() reads and checks nothing, on either route. 0.5.1 had to look
+    up the input's reader to compare file types, and so refused an unknown
+    suffix early, for a picture output only. Both routes now say so from
+    run(), and neither leaves a file behind."""
+    for name in ("photo_compressed.ppm", "photo.cim"):
+        output = tmp_path / name
+        codec = Codec().compress(input=str(tmp_path / "photo.jpg"), output=str(output))
+        with pytest.raises(UnsupportedFileFormatError, match=r"unsupported image format '\.jpg'"):
+            codec.run()
+        assert not output.exists()
 
 
 # --- anything that is not a picture is still the container --------------------
