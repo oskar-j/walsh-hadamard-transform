@@ -329,11 +329,11 @@ class Codec:
             This codec, so calls can be chained.
 
         Raises:
-            ValueError: If ``coeff`` is negative. It is compared against a
-                magnitude, so a negative value could only be a mistake: it
-                would silently keep everything.
+            ValueError: If ``coeff`` is negative or NaN. It is compared
+                against a magnitude, so either value could only be a mistake:
+                it would silently keep everything.
         """
-        if coeff is not None and coeff < 0:
+        if coeff is not None and not coeff >= 0:
             raise ValueError(f"coeff must be non-negative, got {coeff}")
         self._coeff_removal = coeff
         return self
