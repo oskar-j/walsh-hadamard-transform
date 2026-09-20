@@ -390,3 +390,53 @@ def test_bad_block_geometry_is_a_clean_error_that_writes_nothing(
     assert result.exit_code == 1, result.output
     assert "Error:" in result.output and match in result.output
     assert not output.exists()
+
+
+def test_a_picture_as_output_skips_the_cim_file(
+    runner: CliRunner, gradient_ppm: Path, tmp_path: Path
+) -> None:
+    """`walsh compress photo.ppm photo_lossy.ppm` writes the reconstruction,
+    exactly what the two commands would have written between them."""
+    direct = tmp_path / "direct.ppm"
+    result = runner.invoke(main, ["compress", str(gradient_ppm), str(direct)])
+    assert result.exit_code == 0, result.output
+
+    container, expected = tmp_path / "two.cim", tmp_path / "two.ppm"
+    assert runner.invoke(main, ["compress", str(gradient_ppm), str(container)]).exit_code == 0
+    assert runner.invoke(main, ["extract", str(container), str(expected)]).exit_code == 0
+    assert direct.read_bytes() == expected.read_bytes()
+    assert direct.read_bytes() != gradient_ppm.read_bytes(), "the codec is lossy"
+
+
+def test_the_options_apply_to_a_picture_output_too(
+    runner: CliRunner, gradient_ppm: Path, tmp_path: Path
+) -> None:
+    plain, coarse = tmp_path / "plain.ppm", tmp_path / "coarse.ppm"
+    assert runner.invoke(main, ["compress", str(gradient_ppm), str(plain)]).exit_code == 0
+    result = runner.invoke(
+        main, ["compress", "--packed-block-size", "1", str(gradient_ppm), str(coarse)]
+    )
+    assert result.exit_code == 0, result.output
+    assert coarse.read_bytes() != plain.read_bytes()
+
+
+def test_a_picture_of_another_type_is_a_clean_error_that_names_the_release(
+    runner: CliRunner, gradient_ppm: Path, tmp_path: Path
+) -> None:
+    """NotImplementedError is not one of EXPECTED_ERRORS, so without its own
+    handler this would be a traceback."""
+    output = tmp_path / "crossed.png"
+    result = runner.invoke(main, ["compress", str(gradient_ppm), str(output)])
+    assert result.exit_code == 1
+    assert "Error:" in result.output
+    assert "planned for 0.6.0" in result.output and "issues/51" in result.output
+    assert "extract that to .png" in result.output
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+    assert not output.exists()
+
+
+def test_the_help_says_a_picture_can_be_the_output(runner: CliRunner) -> None:
+    result = runner.invoke(main, ["compress", "--help"])
+    text = " ".join(result.output.split())
+    assert "the .cim file is skipped" in text
+    assert "A different picture type is not supported yet" in text

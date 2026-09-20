@@ -22,10 +22,10 @@ def test_compress_then_extract_restores_shape_and_approximate_content(
     compressed = tmp_path / "out.cim"
     restored = tmp_path / "back.bmp"
 
-    Task().with_action("compress").with_input(str(gradient_bmp)).with_output(str(compressed)).run()
+    Task().compress(input=str(gradient_bmp), output=str(compressed)).run()
     assert compressed.exists()
 
-    Task().with_action("extract").with_input(str(compressed)).with_output(str(restored)).run()
+    Task().extract(input=str(compressed), output=str(restored)).run()
 
     before, after = _pixels(gradient_bmp), _pixels(restored)
     assert before.shape == after.shape
@@ -35,7 +35,7 @@ def test_compress_then_extract_restores_shape_and_approximate_content(
 
 def test_compression_actually_shrinks_the_data(sample_bmp: Path, tmp_path: Path) -> None:
     compressed = tmp_path / "sample.cim"
-    Task().with_action("compress").with_input(str(sample_bmp)).with_output(str(compressed)).run()
+    Task().compress(input=str(sample_bmp), output=str(compressed)).run()
     assert compressed.stat().st_size < sample_bmp.stat().st_size
 
 
@@ -45,9 +45,7 @@ def test_smaller_packed_block_size_produces_a_smaller_file(
     sizes = {}
     for packed in (2, 4):
         output = tmp_path / f"packed{packed}.cim"
-        Task(packed_block_size=packed).with_action("compress").with_input(
-            str(gradient_bmp)
-        ).with_output(str(output)).run()
+        Task(packed_block_size=packed).compress(input=str(gradient_bmp), output=str(output)).run()
         sizes[packed] = output.stat().st_size
     assert sizes[2] < sizes[4]
 
@@ -69,8 +67,8 @@ def test_non_multiple_dimensions_are_padded_and_cropped_back(
 
     compressed = tmp_path / "odd.cim"
     restored = tmp_path / "odd-back.bmp"
-    Task().with_action("compress").with_input(str(source)).with_output(str(compressed)).run()
-    Task().with_action("extract").with_input(str(compressed)).with_output(str(restored)).run()
+    Task().compress(input=str(source), output=str(compressed)).run()
+    Task().extract(input=str(compressed), output=str(restored)).run()
 
     image = BMPImage()
     image.load(str(restored))
@@ -98,27 +96,42 @@ def test_merge_crops_padding() -> None:
     assert merged.shape == (6, 6)
 
 
-def test_unknown_action_is_rejected() -> None:
-    with pytest.raises(ValueError, match="unknown action"):
-        Task().with_action("sharpen")
-
-
-def test_run_without_action_is_rejected() -> None:
-    with pytest.raises(ValueError, match="no action selected"):
+def test_run_without_compress_or_extract_is_rejected() -> None:
+    with pytest.raises(ValueError, match=r"nothing to run; call compress\(\) or extract\(\)"):
         Task().run()
 
 
-def test_action_accepts_enum_and_string() -> None:
-    assert Task().with_action(Action.COMPRESS)._action is Action.COMPRESS
-    assert Task().with_action("extract")._action is Action.EXTRACT
+def test_compress_and_extract_record_what_run_will_do() -> None:
+    """Both only plan: nothing is read or written until run()."""
+    task = Task().compress(input="missing.ppm", output="never.cim")
+    assert (task._action, task._input, task._output) == (
+        Action.COMPRESS,
+        "missing.ppm",
+        "never.cim",
+    )
+    task.extract("missing.cim", "never.ppm")
+    assert (task._action, task._input, task._output) == (
+        Action.EXTRACT,
+        "missing.cim",
+        "never.ppm",
+    )
+    assert not Path("never.cim").exists() and not Path("never.ppm").exists()
+
+
+def test_the_names_compress_and_extract_no_longer_run_anything() -> None:
+    """Up to 0.5.0 `compress()` and `extract()` took no arguments and ran at
+    once. A caller from then gets told what is missing, not a silent no-op."""
+    for name in ("compress", "extract"):
+        with pytest.raises(TypeError, match="'input' and 'output'"):
+            getattr(Task(), name)()
 
 
 def test_builder_methods_return_self() -> None:
     task = Task()
-    assert task.with_input("a") is task
-    assert task.with_output("b") is task
+    assert task.compress(input="a.ppm", output="b.cim") is task
+    assert task.extract(input="b.cim", output="c.ppm") is task
     assert task.with_coeff_removal(0.1) is task
-    assert task.with_action("compress") is task
+    assert task.with_input_size(4, 4) is task
 
 
 def test_bmp_and_ppm_sources_compress_identically(tmp_path: Path) -> None:
@@ -131,8 +144,8 @@ def test_bmp_and_ppm_sources_compress_identically(tmp_path: Path) -> None:
 
     from_bmp = tmp_path / "from_bmp.cim"
     from_ppm = tmp_path / "from_ppm.cim"
-    Task().with_action("compress").with_input(str(bmp)).with_output(str(from_bmp)).run()
-    Task().with_action("compress").with_input(str(ppm)).with_output(str(from_ppm)).run()
+    Task().compress(input=str(bmp), output=str(from_bmp)).run()
+    Task().compress(input=str(ppm), output=str(from_ppm)).run()
 
     assert from_bmp.read_bytes() == from_ppm.read_bytes()
 
@@ -140,8 +153,8 @@ def test_bmp_and_ppm_sources_compress_identically(tmp_path: Path) -> None:
 def test_ppm_roundtrips_through_the_codec(gradient_ppm: Path, tmp_path: Path) -> None:
     compressed = tmp_path / "p.cim"
     restored = tmp_path / "back.ppm"
-    Task().with_action("compress").with_input(str(gradient_ppm)).with_output(str(compressed)).run()
-    Task().with_action("extract").with_input(str(compressed)).with_output(str(restored)).run()
+    Task().compress(input=str(gradient_ppm), output=str(compressed)).run()
+    Task().extract(input=str(compressed), output=str(restored)).run()
 
     before, after = _pixels(gradient_ppm), _pixels(restored)
     assert before.shape == after.shape
@@ -154,9 +167,9 @@ def test_cross_format_conversion_preserves_the_picture(gradient_bmp: Path, tmp_p
     as_ppm = tmp_path / "out.ppm"
     as_bmp = tmp_path / "out.bmp"
 
-    Task().with_action("compress").with_input(str(gradient_bmp)).with_output(str(compressed)).run()
-    Task().with_action("extract").with_input(str(compressed)).with_output(str(as_ppm)).run()
-    Task().with_action("extract").with_input(str(compressed)).with_output(str(as_bmp)).run()
+    Task().compress(input=str(gradient_bmp), output=str(compressed)).run()
+    Task().extract(input=str(compressed), output=str(as_ppm)).run()
+    Task().extract(input=str(compressed), output=str(as_bmp)).run()
 
     from walsh.image import BMPImage, PPMImage
 
@@ -168,11 +181,11 @@ def test_cross_format_conversion_preserves_the_picture(gradient_bmp: Path, tmp_p
 
 def test_unknown_output_format_is_rejected(gradient_bmp: Path, tmp_path: Path) -> None:
     compressed = tmp_path / "u.cim"
-    Task().with_action("compress").with_input(str(gradient_bmp)).with_output(str(compressed)).run()
+    Task().compress(input=str(gradient_bmp), output=str(compressed)).run()
 
-    task = Task().with_action("extract").with_input(str(compressed))
+    task = Task().extract(input=str(compressed), output=str(tmp_path / "out.jpg"))
     with pytest.raises(UnsupportedFileFormatError, match="unsupported image format"):
-        task.with_output(str(tmp_path / "out.jpg")).run()
+        task.run()
 
 
 def test_sample_ppm_compresses_and_survives_the_round_trip(
@@ -181,10 +194,10 @@ def test_sample_ppm_compresses_and_survives_the_round_trip(
     """The checked-in Blue Marble photo, end to end through the real codec."""
     compressed = tmp_path / "earth.cim"
     restored = tmp_path / "earth.ppm"
-    Task().with_action("compress").with_input(str(sample_ppm)).with_output(str(compressed)).run()
+    Task().compress(input=str(sample_ppm), output=str(compressed)).run()
     assert compressed.stat().st_size < sample_ppm.stat().st_size
 
-    Task().with_action("extract").with_input(str(compressed)).with_output(str(restored)).run()
+    Task().extract(input=str(compressed), output=str(restored)).run()
 
     before, after = _pixels(sample_ppm), _pixels(restored)
     assert before.shape == after.shape
@@ -196,8 +209,8 @@ def test_sample_ppm_compresses_and_survives_the_round_trip(
 def test_tiff_roundtrips_through_the_codec(gradient_tiff: Path, tmp_path: Path) -> None:
     compressed = tmp_path / "t.cim"
     restored = tmp_path / "back.tif"
-    Task().with_action("compress").with_input(str(gradient_tiff)).with_output(str(compressed)).run()
-    Task().with_action("extract").with_input(str(compressed)).with_output(str(restored)).run()
+    Task().compress(input=str(gradient_tiff), output=str(compressed)).run()
+    Task().extract(input=str(compressed), output=str(restored)).run()
 
     before, after = _pixels(gradient_tiff), _pixels(restored)
     assert before.shape == after.shape
@@ -228,7 +241,7 @@ def test_every_source_format_compresses_identically(tmp_path: Path) -> None:
     digests = {}
     for name, path in sources.items():
         output = tmp_path / f"{name}.cim"
-        Task().with_action("compress").with_input(str(path)).with_output(str(output)).run()
+        Task().compress(input=str(path), output=str(output)).run()
         digests[name] = output.read_bytes()
 
     assert len(set(digests.values())) == 1, sorted(digests)
@@ -239,12 +252,12 @@ def test_extract_to_any_format_gives_the_same_picture(
     gradient_bmp: Path, tmp_path: Path, suffix: str
 ) -> None:
     compressed = tmp_path / "x.cim"
-    Task().with_action("compress").with_input(str(gradient_bmp)).with_output(str(compressed)).run()
+    Task().compress(input=str(gradient_bmp), output=str(compressed)).run()
 
     reference = tmp_path / "ref.bmp"
     target = tmp_path / f"out{suffix}"
-    Task().with_action("extract").with_input(str(compressed)).with_output(str(reference)).run()
-    Task().with_action("extract").with_input(str(compressed)).with_output(str(target)).run()
+    Task().extract(input=str(compressed), output=str(reference)).run()
+    Task().extract(input=str(compressed), output=str(target)).run()
 
     np.testing.assert_array_equal(_pixels(reference), _pixels(target))
 
@@ -261,7 +274,7 @@ def test_checked_in_samples_agree_across_containers(
     digests = []
     for source in (sample_ppm, sample_tiff, sample_pam, sample_npy, sample_png):
         output = tmp_path / f"{source.suffix.lstrip('.')}.cim"
-        Task().with_action("compress").with_input(str(source)).with_output(str(output)).run()
+        Task().compress(input=str(source), output=str(output)).run()
         digests.append(output.read_bytes())
 
     for other in (sample_tiff, sample_pam, sample_npy, sample_png):
@@ -273,20 +286,20 @@ def test_sample_png_survives_the_round_trip(sample_png: Path, tmp_path: Path) ->
     """The one compressed source: the .cim is still smaller than the PNG."""
     compressed = tmp_path / "earth.cim"
     restored = tmp_path / "earth.png"
-    Task().with_action("compress").with_input(str(sample_png)).with_output(str(compressed)).run()
+    Task().compress(input=str(sample_png), output=str(compressed)).run()
     assert compressed.stat().st_size < sample_png.stat().st_size
 
-    Task().with_action("extract").with_input(str(compressed)).with_output(str(restored)).run()
+    Task().extract(input=str(compressed), output=str(restored)).run()
     assert np.abs(_pixels(sample_png) - _pixels(restored)).mean() < 20
 
 
 def test_sample_npy_survives_the_round_trip(sample_npy: Path, tmp_path: Path) -> None:
     compressed = tmp_path / "earth.cim"
     restored = tmp_path / "earth.npy"
-    Task().with_action("compress").with_input(str(sample_npy)).with_output(str(compressed)).run()
+    Task().compress(input=str(sample_npy), output=str(compressed)).run()
     assert compressed.stat().st_size < sample_npy.stat().st_size
 
-    Task().with_action("extract").with_input(str(compressed)).with_output(str(restored)).run()
+    Task().extract(input=str(compressed), output=str(restored)).run()
     assert np.abs(_pixels(sample_npy) - _pixels(restored)).mean() < 20
     assert np.load(restored, allow_pickle=False).shape == (400, 400, 3)
 
@@ -294,20 +307,20 @@ def test_sample_npy_survives_the_round_trip(sample_npy: Path, tmp_path: Path) ->
 def test_sample_pam_survives_the_round_trip(sample_pam: Path, tmp_path: Path) -> None:
     compressed = tmp_path / "earth.cim"
     restored = tmp_path / "earth.pam"
-    Task().with_action("compress").with_input(str(sample_pam)).with_output(str(compressed)).run()
+    Task().compress(input=str(sample_pam), output=str(compressed)).run()
     assert compressed.stat().st_size < sample_pam.stat().st_size
 
-    Task().with_action("extract").with_input(str(compressed)).with_output(str(restored)).run()
+    Task().extract(input=str(compressed), output=str(restored)).run()
     assert np.abs(_pixels(sample_pam) - _pixels(restored)).mean() < 20
 
 
 def test_sample_tiff_survives_the_round_trip(sample_tiff: Path, tmp_path: Path) -> None:
     compressed = tmp_path / "earth.cim"
     restored = tmp_path / "earth.tiff"
-    Task().with_action("compress").with_input(str(sample_tiff)).with_output(str(compressed)).run()
+    Task().compress(input=str(sample_tiff), output=str(compressed)).run()
     assert compressed.stat().st_size < sample_tiff.stat().st_size
 
-    Task().with_action("extract").with_input(str(compressed)).with_output(str(restored)).run()
+    Task().extract(input=str(compressed), output=str(restored)).run()
     assert np.abs(_pixels(sample_tiff) - _pixels(restored)).mean() < 20
 
 
@@ -455,7 +468,7 @@ def test_extract_fills_channels_without_blocks_with_neutral_values(tmp_path: Pat
     source.write_bytes(struct.pack("<II", 5, 3) + struct.pack("<HHH", 8, 4, 0) * 3)
     restored = tmp_path / "empty.ppm"
 
-    Task().with_action("extract").with_input(str(source)).with_output(str(restored)).run()
+    Task().extract(input=str(source), output=str(restored)).run()
 
     pixels = _pixels(restored)
     assert pixels.shape == (15, 3)
@@ -480,8 +493,8 @@ def test_a_flat_colour_survives_at_any_size(width: int, height: int, tmp_path: P
     compressed = tmp_path / "flat.cim"
     restored = tmp_path / "flat-back.ppm"
 
-    Task().with_action("compress").with_input(str(source)).with_output(str(compressed)).run()
-    Task().with_action("extract").with_input(str(compressed)).with_output(str(restored)).run()
+    Task().compress(input=str(source), output=str(compressed)).run()
+    Task().extract(input=str(compressed), output=str(restored)).run()
 
     image = PPMImage()
     image.load(str(restored))
@@ -562,7 +575,7 @@ def test_compress_rejects_an_oversized_image_before_touching_the_output(
 
     task = Task(y_block_size=1, packed_block_size=1)
     with pytest.raises(UnsupportedFileFormatError, match=r"too large for the \.cim container"):
-        task.with_action("compress").with_input(str(source)).with_output(str(output)).run()
+        task.compress(input=str(source), output=str(output)).run()
 
     assert output.read_bytes() == b"A PREVIOUS ENCODE"
 
@@ -574,9 +587,7 @@ def test_the_same_image_compresses_with_a_larger_block(tmp_path: Path) -> None:
     source = write_ppm(tmp_path / "big.ppm", 256, 256, gradient_pixels(256, 256))
     output = tmp_path / "out.cim"
 
-    Task(y_block_size=2, packed_block_size=1).with_action("compress").with_input(
-        str(source)
-    ).with_output(str(output)).run()
+    Task(y_block_size=2, packed_block_size=1).compress(input=str(source), output=str(output)).run()
 
     assert output.stat().st_size > 0
 
@@ -630,8 +641,8 @@ def test_packed_size_need_not_be_a_power_of_two(
     here would be a regression, not a fix."""
     compressed, restored = tmp_path / "p.cim", tmp_path / "p.ppm"
     task = Task(packed_block_size=packed)
-    task.with_action("compress").with_input(str(gradient_ppm)).with_output(str(compressed)).run()
-    Task().with_action("extract").with_input(str(compressed)).with_output(str(restored)).run()
+    task.compress(input=str(gradient_ppm), output=str(compressed)).run()
+    Task().extract(input=str(compressed), output=str(restored)).run()
     assert _pixels(restored).shape == _pixels(gradient_ppm).shape
 
 
@@ -640,8 +651,8 @@ def test_packed_may_equal_the_smallest_edge(gradient_ppm: Path, tmp_path: Path) 
     cropping and must stay legal: the bound is the smallest edge, not a constant."""
     compressed, restored = tmp_path / "p.cim", tmp_path / "p.ppm"
     task = Task(y_block_size=16, cb_block_size=16, cr_block_size=16, packed_block_size=16)
-    task.with_action("compress").with_input(str(gradient_ppm)).with_output(str(compressed)).run()
-    Task().with_action("extract").with_input(str(compressed)).with_output(str(restored)).run()
+    task.compress(input=str(gradient_ppm), output=str(compressed)).run()
+    Task().extract(input=str(compressed), output=str(restored)).run()
     assert np.abs(_pixels(restored) - _pixels(gradient_ppm)).max() <= 1
 
 
@@ -656,8 +667,8 @@ def test_the_largest_legal_edge_keeps_white_white(tmp_path: Path) -> None:
     source = write_ppm(tmp_path / "white.ppm", 256, 256, [(255, 255, 255)] * (256 * 256))
     compressed, restored = tmp_path / "w.cim", tmp_path / "w.ppm"
     task = Task(y_block_size=128, cb_block_size=128, cr_block_size=128)
-    task.with_action("compress").with_input(str(source)).with_output(str(compressed)).run()
-    Task().with_action("extract").with_input(str(compressed)).with_output(str(restored)).run()
+    task.compress(input=str(source), output=str(compressed)).run()
+    Task().extract(input=str(compressed), output=str(restored)).run()
     assert _pixels(restored).min() >= 254
 
     with pytest.raises(ValueError, match="at most 128"):
@@ -682,9 +693,7 @@ def test_coeff_removal_leaves_fewer_coefficients_the_higher_it_is(
     outputs: dict[float | None, Path] = {}
     for coeff in (None, 0.5, 100.0, 500.0):
         output = tmp_path / f"{coeff}.cim"
-        Task().with_coeff_removal(coeff).with_action("compress").with_input(
-            str(gradient_bmp)
-        ).with_output(str(output)).run()
+        Task().with_coeff_removal(coeff).compress(input=str(gradient_bmp), output=str(output)).run()
         outputs[coeff] = output
 
     assert outputs[0.5].read_bytes() == outputs[None].read_bytes()

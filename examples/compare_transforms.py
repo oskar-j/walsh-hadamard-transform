@@ -87,8 +87,8 @@ def round_trip(
     def task() -> Task:
         return Task(packed_block_size=packed, transform=transform)
 
-    task().with_action("compress").with_input(str(source)).with_output(str(compressed)).run()
-    task().with_action("extract").with_input(str(compressed)).with_output(str(restored)).run()
+    task().compress(input=str(source), output=str(compressed)).run()
+    task().extract(input=str(compressed), output=str(restored)).run()
     return psnr(pixels(source), pixels(restored)), compressed.stat().st_size
 
 

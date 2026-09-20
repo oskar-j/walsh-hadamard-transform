@@ -108,11 +108,50 @@ is where an import cycle between the family packages would show.
 
 `walsh.task` orchestrates; the other modules are layers under it.
 
-**`task.py`** — `Task` is a fluent builder (`with_action`, `with_input`,
-`with_output`, `with_coeff_removal`, then `run()`). Actions are the `Action`
-enum, dispatched through the `Task._ACTIONS` ClassVar; adding an action means
-adding a method *and* an entry there. Block sizes are constructor kwargs
-defaulting to the original values (Y 8, chroma 16, packed 4), and
+**`task.py`** — `Task` is a fluent builder: `compress(input=, output=)` or
+`extract(input=, output=)` says what to do, `with_coeff_removal` and
+`with_input_size` are settings, and `run()` does it; nothing is read or
+written before `run()`. That shape is the maintainer's design (0.5.1) and
+replaced `with_action(A).with_input(X).with_output(Y)` outright: those three
+methods and the old argument-less, run-at-once `compress()` / `extract()` are
+gone, with no deprecation shim, as the flat module paths went in 0.4.16. The
+parameter is called `input` on purpose, builtin or not. The plan is recorded
+as an `Action` and dispatched through the `Task._ACTIONS` ClassVar to the
+private `_compress` / `_extract`; adding an action means a public planning
+method, a private pipeline *and* an entry there. The pipelines are two
+halves, `_encode` (picture in, `CustomizableImage` out) and `_decode`
+(container in, picture out), and `_compress` / `_extract` are compositions of
+them.
+
+**`compress` with a picture as its output skips the `.cim` file** (0.5.1):
+`Task().compress(input="a.ppm", output="a_compressed.ppm")` writes the lossy
+reconstruction. What decides is `_writes_a_picture`: a suffix in `SUFFIXES`
+means a picture, and anything else (`.cim`, another suffix, none, stdout) the
+container, as before. The container still goes through its bytes, in memory:
+`_decode(CustomizableImage.from_bytes(container.to_bytes()))`. Do not
+"optimise" that into handing `_decode` the container `_encode` returned. The
+one in hand holds *unrounded* blocks *cropped* to the packed corner, while a
+decoder is owed what a file gives it, `int16`-rounded, clipped and zero-padded
+to full blocks; going through `_write` / `_read`, the code `save` / `load`
+use, is what makes the direct output identical to the two-step one by
+construction, and `test_golden.py` holds it to the checked-in `recreated.*`
+files byte for byte (PNG by pixels). **The output must be the input's file
+type for now**: anything else is a `NotImplementedError` raised by
+`compress()` itself, before anything is read and leaving the task unchanged,
+naming 0.6.0 and issue #51 (`CROSS_FORMAT_ISSUE`). The type is the reader
+class, so `.tif`/`.tiff`, `.ppm`/`.pnm` and `.pkl`/`.pickle` do not cross,
+and stdin counts as BMP. The restriction is the maintainer's staging, not a
+technical limit: `_decode` ends in `reader_for(output)` and would write any
+format, so #51 is mostly the removal of that check plus its tests. The CLI
+inherits the feature because it builds a `Task`
+(`walsh compress a.ppm a_lossy.ppm`), and reports the refusal as an `Error:`
+line through `_REPORTED` in `cli.py`, which adds `NotImplementedError` to
+`EXPECTED_ERRORS` for the command line only: in a library it can also mean
+broken code (an abstract `Transform` method), which should keep its
+traceback. Take it out of `_REPORTED` when nothing raises it.
+
+Block sizes are constructor kwargs defaulting to the original values (Y 8,
+chroma 16, packed 4), and
 `Task.__init__` validates them (0.4.11, #21): each edge a positive power of
 two no larger than `MAX_BLOCK_SIZE` (`COEFF_MAX // 255` = 128, above which an
 all-255 block's DC overflows `int16` and the clip on write silently halves
@@ -173,7 +212,9 @@ documented `set_dimensions` then `set_raw_data` build is transiently
 inconsistent by design. `CustomizableImage` is deliberately not a
 `RasterImage`; it holds each channel as one `(count, edge, edge)` stack,
 `get_stack(channel)` is the array form, and `get_y_data()` and friends return
-views into it. `bmp.py` converts both ways (BMP is blue-green-red and
+views into it. `to_bytes()` / `from_bytes()` (0.5.1) are `save` / `load`
+against memory, sharing `_write` / `_read` with them. `bmp.py` converts both
+ways (BMP is blue-green-red and
 bottom-up, two reversed views); `png.py`, `ppm.py`, `pam.py`, `tiff.py` and
 `npy.py` need no conversion.
 
@@ -606,6 +647,10 @@ regression tests it asked for and took coverage to 100%. v0.4.19 made the
 tests take the repository root from pytest's rootdir rather than from
 `__file__`. **v0.5.0 added PNG** (#17), the first compressed format, through
 stdlib `zlib` with the row filters undone a diagonal at a time, and grouped
-`data/` into a folder per file type.
+`data/` into a folder per file type. v0.5.1 replaced the `with_action` /
+`with_input` / `with_output` builder with `compress(input=, output=)` and
+`extract(input=, output=)`, a breaking change made on purpose, and let
+`compress` write the reconstruction straight to a picture of the input's
+type, skipping the `.cim` file; other types are #51, for 0.6.0.
 Partially based on
 https://github.com/ktisha/python2012/tree/dee4beda8e22f3a66a3e31384d4b72ab66102e88/avereshchagin

@@ -84,12 +84,12 @@ def _psnr(original: Path, restored: Path) -> float:
 
 
 def _compress(task: Task, source: Path, output: Path) -> bytes:
-    task.with_action("compress").with_input(str(source)).with_output(str(output)).run()
+    task.compress(input=str(source), output=str(output)).run()
     return output.read_bytes()
 
 
 def _extract(task: Task, source: Path, output: Path) -> Path:
-    task.with_action("extract").with_input(str(source)).with_output(str(output)).run()
+    task.extract(input=str(source), output=str(output)).run()
     return output
 
 

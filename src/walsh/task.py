@@ -1,10 +1,25 @@
-"""Orchestration: the compress and extract pipelines."""
+"""Orchestration: the compress and extract pipelines.
+
+A :class:`Task` is told what to do by :meth:`Task.compress` or
+:meth:`Task.extract`, each naming its input and its output, and does it on
+:meth:`Task.run`::
+
+    Task().compress(input="photo.ppm", output="photo.cim").run()
+    Task().extract(input="photo.cim", output="restored.ppm").run()
+
+``compress`` also accepts a picture as its output, which skips the ``.cim``
+file: the picture goes through the whole codec in memory and what is written
+is its lossy reconstruction, byte for byte what the two steps above produce::
+
+    Task().compress(input="photo.ppm", output="photo_compressed.ppm").run()
+"""
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Sequence
 from enum import Enum
+from pathlib import Path
 from typing import ClassVar
 
 import numpy as np
@@ -15,6 +30,7 @@ from walsh.exceptions import UnsupportedFileFormatError
 from walsh.image import (
     MAX_BLOCK_SIZE,
     MAX_BLOCKS_PER_CHANNEL,
+    SUFFIXES,
     BlockDescription,
     CustomizableImage,
     FileSource,
@@ -40,6 +56,10 @@ DEFAULT_Y_BLOCK_SIZE = 8
 DEFAULT_CHROMA_BLOCK_SIZE = 16
 DEFAULT_PACKED_BLOCK_SIZE = 4
 
+#: Where writing a different file type from the one read is tracked. Until it
+#: is done, :meth:`Task.compress` refuses it and points here.
+CROSS_FORMAT_ISSUE = "https://github.com/oskar-j/walsh-hadamard-transform/issues/51"
+
 #: Neutral fill values used when a channel carries no blocks.
 NEUTRAL_LUMA = 0
 NEUTRAL_CHROMA = 128
@@ -55,8 +75,8 @@ class Action(str, Enum):
 class Task:
     """A single compress or extract run, configured fluently.
 
-    >>> Task().with_action("compress").with_input("in.bmp").with_output("out.cim").run()
-    ...                                                        # doctest: +SKIP
+    >>> Task().compress(input="in.bmp", output="out.cim").run()  # doctest: +SKIP
+    >>> Task().extract(input="out.cim", output="back.bmp").run()  # doctest: +SKIP
 
     :param y_block_size: block edge used for the luma channel.
     :param cb_block_size: block edge used for the Cb channel.
@@ -185,52 +205,83 @@ class Task:
 
     # -- configuration ---------------------------------------------------
 
-    def with_input(self, source: FileSource) -> Task:
-        """Set where the input is read from.
+    def compress(self, input: FileSource, output: FileSource) -> Task:
+        """Plan a compression of ``input``; :meth:`run` carries it out.
+
+        What is written depends on what ``output`` is named. A picture suffix
+        (``.ppm``, ``.png``, any key of :data:`~walsh.image.SUFFIXES`) skips
+        the ``.cim`` file: the picture is compressed and restored in memory,
+        and its lossy reconstruction is written in that format. The file is as
+        large as any other picture of its size, since it is the *result* of
+        the compression and not the compressed data, and it is byte for byte
+        what compressing to a ``.cim`` and extracting that would have
+        written, because the decoder is handed the very bytes the file would
+        have held. Any other name, ``.cim`` by convention, gets the spectral
+        container itself.
 
         Args:
-            source: Path to read, or ``None`` to read from ``sys.stdin``,
-                which the CLI never does; see
-                :data:`~walsh.image.FileSource` for what that requires.
-
-        Returns:
-            This task, so calls can be chained.
-        """
-        self._input = source
-        return self
-
-    def with_output(self, destination: FileSource) -> Task:
-        """Set where the result is written.
-
-        For :meth:`extract` the suffix also selects the output raster format.
-
-        Args:
-            destination: Path to write, or ``None`` to write to stdout.
-
-        Returns:
-            This task, so calls can be chained.
-        """
-        self._output = destination
-        return self
-
-    def with_action(self, action: Action | str) -> Task:
-        """Select which pipeline :meth:`run` will execute.
-
-        Args:
-            action: An :class:`Action`, or its string value.
+            input: Picture to read, its format taken from the suffix, or
+                ``None`` to read a BMP from ``sys.stdin``, which the CLI
+                never does; see :data:`~walsh.image.FileSource`.
+            output: Where to write: a ``.cim`` path, a picture path of the
+                same file type as ``input``, or ``None`` to write the
+                container to stdout.
 
         Returns:
             This task, so calls can be chained.
 
         Raises:
-            ValueError: If ``action`` is not one of the known actions.
+            NotImplementedError: If ``output`` is a picture of a different
+                file type from ``input``, such as ``.ppm`` to ``.png``. That
+                is planned for 0.6.0; until then compress to a ``.cim`` and
+                extract it, which crosses formats freely. Suffixes that share
+                a reader, such as ``.tif`` and ``.tiff``, are one type.
+            UnsupportedFileFormatError: If ``output`` is a picture and the
+                suffix of ``input`` is not a format this package reads.
         """
-        try:
-            self._action = Action(action)
-        except ValueError:
-            valid = ", ".join(repr(a.value) for a in Action)
-            raise ValueError(f"unknown action {action!r}; expected one of {valid}") from None
+        if self._writes_a_picture(output) and type(reader_for(input)) is not type(
+            reader_for(output)
+        ):
+            suffix = Path(str(output)).suffix.lower()
+            raise NotImplementedError(
+                f"cannot compress {str(input)!r} straight to {str(output)!r}: writing a "
+                f"different file type from the one read is not implemented yet and is "
+                f"planned for 0.6.0 ({CROSS_FORMAT_ISSUE}). Until then keep the file type, "
+                f"or compress to a .cim and extract that to {suffix}"
+            )
+        self._action, self._input, self._output = Action.COMPRESS, input, output
         return self
+
+    def extract(self, input: FileSource, output: FileSource) -> Task:
+        """Plan the restoring of a picture from a ``.cim``; :meth:`run` does it.
+
+        Args:
+            input: The ``.cim`` to read, or ``None`` to read it from
+                ``sys.stdin``.
+            output: Picture to write, its format taken from the suffix, so it
+                need not be the format the picture went in as. ``None`` writes
+                a BMP to stdout.
+
+        Returns:
+            This task, so calls can be chained.
+        """
+        self._action, self._input, self._output = Action.EXTRACT, input, output
+        return self
+
+    @staticmethod
+    def _writes_a_picture(destination: FileSource) -> bool:
+        """Tell whether a compression's output is a picture or the container.
+
+        Args:
+            destination: Where :meth:`compress` was told to write.
+
+        Returns:
+            ``True`` if the name ends in a suffix this package writes pictures
+            for. Anything else (``.cim``, another suffix, none, or stdout)
+            means the container, as it did before a picture could be named
+            here.
+        """
+        return destination is not None and Path(destination).suffix.lower() in SUFFIXES
 
     def with_input_size(self, width: int | None, height: int | None) -> Task:
         """Declare how large the input picture is, for input that cannot say.
@@ -490,20 +541,23 @@ class Task:
 
     # -- pipelines -------------------------------------------------------
 
-    def compress(self) -> None:
-        """Read a raster image, transform it, and write a spectral ``.cim``.
+    def _encode(self) -> CustomizableImage:
+        """Read the input picture and transform it into a spectral container.
 
-        The input format is chosen from the filename suffix, so this reads BMP
-        or PPM without being told which.
+        The input format is chosen from the filename suffix.
+
+        Returns:
+            The container, not yet written anywhere. Its blocks are cropped to
+            the packed corner but still unrounded: the rounding to ``int16``
+            happens on the way out of it, to a file or to bytes.
 
         Raises:
             UnsupportedFileFormatError: If the input suffix is unknown, the
                 file is not valid for its format, or the image needs more
                 blocks than the ``.cim`` container can count.
-            OSError: If either file cannot be opened.
+            ValueError: If the picture is not the size that was declared.
+            OSError: If the input cannot be opened.
         """
-        log.info("compressing %s -> %s", self._input, self._output)
-
         source_image = reader_for(self._input)
         if self._input_size is not None:
             source_image.declare_size(*self._input_size)
@@ -546,26 +600,21 @@ class Task:
             BlockDescription(self._cr_block_size, packed, len(spectral["cr"])),
         )
         customizable_image.set_data(spectral["y"], spectral["cb"], spectral["cr"])
-        customizable_image.save(self._output)
+        return customizable_image
 
-    def extract(self) -> None:
-        """Read a spectral ``.cim``, invert the transform, and write a raster image.
+    def _decode(self, customizable_image: CustomizableImage) -> None:
+        """Invert the transform and write the picture to the output.
 
-        The output format is chosen from the filename suffix, so the picture can
-        come back as a different format from the one it went in as.
+        The output format is chosen from the filename suffix.
+
+        Args:
+            customizable_image: A container as the reader hands it over, its
+                blocks zero-padded back to full size.
 
         Raises:
-            UnsupportedFileFormatError: If the output suffix is unknown, or
-                the ``.cim`` file is truncated or malformed.
-            OSError: If either file cannot be opened.
+            UnsupportedFileFormatError: If the output suffix is unknown.
+            OSError: If the output cannot be written.
         """
-        if self._input_size is not None:
-            raise ValueError(
-                "an input size applies to compress only: a .cim records its own dimensions"
-            )
-        log.info("extracting %s -> %s", self._input, self._output)
-
-        customizable_image = CustomizableImage.load(self._input)
         width, height = customizable_image.get_dimensions()
 
         neutral = {"y": NEUTRAL_LUMA, "cb": NEUTRAL_CHROMA, "cr": NEUTRAL_CHROMA}
@@ -592,22 +641,65 @@ class Task:
         output_image.set_array(pixels)
         output_image.save(self._output)
 
+    def _compress(self) -> None:
+        """Run a compression: to a ``.cim``, or straight through to a picture.
+
+        With a picture as the output the container never reaches a disk, but
+        it is still serialised and parsed back, in memory. That is deliberate.
+        The container in hand holds unrounded blocks cropped to their packed
+        corner, while a decoder is owed what a file would give it: ``int16``
+        coefficients, rounded and clipped, zero-padded to full blocks. Going
+        through the bytes is what makes this output identical to the two-step
+        one by construction, for a few hundred kilobytes of copying.
+
+        Raises:
+            UnsupportedFileFormatError: If a suffix is unknown, the input is
+                not valid for its format, or the image needs more blocks than
+                the ``.cim`` container can count.
+            ValueError: If the picture is not the size that was declared.
+            OSError: If either file cannot be opened.
+        """
+        log.info("compressing %s -> %s", self._input, self._output)
+        customizable_image = self._encode()
+        if self._writes_a_picture(self._output):
+            self._decode(CustomizableImage.from_bytes(customizable_image.to_bytes()))
+        else:
+            customizable_image.save(self._output)
+
+    def _extract(self) -> None:
+        """Run an extraction: read a ``.cim`` and write the picture it holds.
+
+        Raises:
+            ValueError: If an input size was declared, which means nothing
+                here.
+            UnsupportedFileFormatError: If the output suffix is unknown, or
+                the ``.cim`` file is truncated or malformed.
+            OSError: If either file cannot be opened.
+        """
+        if self._input_size is not None:
+            raise ValueError(
+                "an input size applies to compress only: a .cim records its own dimensions"
+            )
+        log.info("extracting %s -> %s", self._input, self._output)
+        self._decode(CustomizableImage.load(self._input))
+
     _ACTIONS: ClassVar[dict[Action, Callable[[Task], None]]] = {
-        Action.COMPRESS: compress,
-        Action.EXTRACT: extract,
+        Action.COMPRESS: _compress,
+        Action.EXTRACT: _extract,
     }
 
     def run(self) -> None:
         """Execute the configured action.
 
         Raises:
-            ValueError: If :meth:`with_action` was never called.
+            ValueError: If neither :meth:`compress` nor :meth:`extract` was
+                called first.
             UnsupportedFileFormatError: If an input or output format is not
                 supported.
             OSError: If a file cannot be read or written.
         """
         if self._action is None:
-            raise ValueError("no action selected; call with_action() first")
+            raise ValueError("nothing to run; call compress() or extract() first")
         log.debug(
             "run action=%s input=%s output=%s coeff_removal=%s transform=%s",
             self._action.value,

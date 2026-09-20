@@ -4,8 +4,11 @@ Typical use::
 
     from walsh import Task
 
-    Task().with_action("compress").with_input("image.bmp").with_output("out.cim").run()
-    Task().with_action("extract").with_input("out.cim").with_output("back.bmp").run()
+    Task().compress(input="image.bmp", output="out.cim").run()
+    Task().extract(input="out.cim", output="back.bmp").run()
+
+    # Or skip the .cim and write the lossy reconstruction directly:
+    Task().compress(input="image.bmp", output="image_compressed.bmp").run()
 """
 
 from __future__ import annotations

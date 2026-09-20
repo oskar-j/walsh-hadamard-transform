@@ -9,6 +9,67 @@ The `## [x.y.z]` headings are load-bearing: the release workflow extracts the
 section matching the version in `pyproject.toml` and uses it as the GitHub
 Release notes.
 
+## [0.5.1]
+
+### Changed
+
+- **`Task` names its input and output in one call, and this is a breaking
+  change.** `compress(input=, output=)` and `extract(input=, output=)` replace
+  the three-call builder:
+
+  | Up to 0.5.0 | From 0.5.1 |
+  | --- | --- |
+  | `Task().with_action("compress").with_input("a.ppm").with_output("a.cim").run()` | `Task().compress(input="a.ppm", output="a.cim").run()` |
+  | `Task().with_action("extract").with_input("a.cim").with_output("b.bmp").run()` | `Task().extract(input="a.cim", output="b.bmp").run()` |
+
+  `with_action`, `with_input` and `with_output` are removed, not deprecated.
+  So are the old `Task.compress()` and `Task.extract()`, which took no
+  arguments and ran at once: the names now belong to the methods above, which
+  only plan, and `run()` still does the work. Calling either the old way is a
+  `TypeError` naming the missing arguments. `with_coeff_removal`,
+  `with_input_size`, the constructor and the `walsh` command are unchanged,
+  and both arguments may be given positionally. `run()` with nothing planned
+  now says `nothing to run; call compress() or extract() first`.
+
+### Added
+
+- **`compress` can skip the `.cim` file.** Name a picture as the output and
+  the picture goes through the whole codec in memory, and its lossy
+  reconstruction is written:
+
+  ```python
+  Task().compress(input="data/ppm/earth.ppm", output="earth_compressed.ppm").run()
+  ```
+
+  The file is a picture like any other and as large as the input: it shows
+  the compression, it is not the compressed data. It is byte for byte what
+  compressing to a `.cim` and extracting that writes, by construction: the
+  container is serialised and parsed back in memory, so the decoder gets the
+  `int16`-rounded, zero-padded blocks a file would give it, not the unrounded
+  ones still in hand. The golden tests hold the direct route to every
+  checked-in `recreated.*` file, byte for byte, and to `recreated.png` by its
+  pixels. Every setting applies: block sizes, coefficient removal, the
+  transform, a declared input size.
+- What decides is the output's suffix: a picture suffix writes the
+  reconstruction, and anything else (`.cim`, another suffix, none, stdout)
+  the container, as before. One behaviour therefore changes: `compress` with
+  an output named `out.ppm` used to write a `.cim` under that name, and now
+  writes a PPM.
+- **The output must be the file type of the input, for now.** Another type,
+  such as `.ppm` to `.png`, raises `NotImplementedError` from `compress()`
+  itself, before anything is read. The message names 0.6.0 and
+  [#51](https://github.com/oskar-j/walsh-hadamard-transform/issues/51), and
+  the route that works today: compress to a `.cim`, then extract that to any
+  format. Suffixes that share a reader (`.tif` and `.tiff`, `.ppm` and
+  `.pnm`, `.pkl` and `.pickle`) are one type.
+- The command line inherits it: `walsh compress photo.ppm photo_lossy.ppm`
+  writes the reconstruction, and another file type is an `Error:` line with
+  the same message, not a traceback.
+- `CustomizableImage.to_bytes()` and `CustomizableImage.from_bytes()`: `save`
+  and `load` against memory, sharing their code.
+
+Codec output is unchanged: every checked-in file is still reproduced exactly.
+
 ## [0.5.0]
 
 ### Added

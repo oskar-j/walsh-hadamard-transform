@@ -7,6 +7,7 @@ little-endian ``int16``. It is a project-specific format; nothing else reads it.
 
 from __future__ import annotations
 
+import io
 import struct
 from collections.abc import Sequence
 from typing import BinaryIO, NamedTuple
@@ -260,12 +261,49 @@ class CustomizableImage:
                 file that is not a ``.cim`` at all is caught.
             OSError: If the file cannot be read.
         """
-        image = cls()
         with open_binary_read(filename) as file:
-            image._read_header(file)
-            for channel, description in image._descriptions.items():
-                if description is not None and description.number_of_blocks > 0:
-                    image._data[channel] = cls._read_blocks(file, description)
+            return cls._read(file)
+
+    @classmethod
+    def from_bytes(cls, data: bytes) -> CustomizableImage:
+        """Read a ``.cim`` held in memory, exactly as :meth:`load` reads a file.
+
+        With :meth:`to_bytes` this is how :class:`~walsh.task.Task` sends a
+        picture through the codec without an intermediate file: the decoder is
+        handed the very bytes a file would have held, so the result cannot
+        differ from a compress followed by an extract.
+
+        Args:
+            data: The whole container.
+
+        Returns:
+            The populated container.
+
+        Raises:
+            UnsupportedFileFormatError: If the data is truncated, or its
+                header does not describe a consistent image.
+        """
+        return cls._read(io.BytesIO(data))
+
+    @classmethod
+    def _read(cls, file: BinaryIO) -> CustomizableImage:
+        """Read a container from a stream, header first.
+
+        Args:
+            file: Stream positioned at the start of the container.
+
+        Returns:
+            The populated container.
+
+        Raises:
+            UnsupportedFileFormatError: If the stream is truncated, or its
+                header does not describe a consistent image.
+        """
+        image = cls()
+        image._read_header(file)
+        for channel, description in image._descriptions.items():
+            if description is not None and description.number_of_blocks > 0:
+                image._data[channel] = cls._read_blocks(file, description)
         return image
 
     def get_stack(self, channel: str) -> Block:
@@ -462,6 +500,35 @@ class CustomizableImage:
             OSError: If the file cannot be written.
         """
         with open_binary_write(filename) as file:
-            self._write_header(file)
-            for blocks in self._data.values():
-                self._write_blocks(file, blocks)
+            self._write(file)
+
+    def to_bytes(self) -> bytes:
+        """Return the container as the bytes :meth:`save` would write.
+
+        Coefficients are rounded and clipped to ``int16`` here as they are on
+        the way to a file, which is part of what the codec does to a picture:
+        reading the result back with :meth:`from_bytes` is a faithful decode,
+        where using the unrounded blocks still in memory would not be.
+
+        Returns:
+            The whole container.
+
+        Raises:
+            ValueError: If any channel has no description set.
+        """
+        buffer = io.BytesIO()
+        self._write(buffer)
+        return buffer.getvalue()
+
+    def _write(self, file: BinaryIO) -> None:
+        """Write the header and every channel's blocks to a stream.
+
+        Args:
+            file: Stream to write to.
+
+        Raises:
+            ValueError: If any channel has no description set.
+        """
+        self._write_header(file)
+        for blocks in self._data.values():
+            self._write_blocks(file, blocks)

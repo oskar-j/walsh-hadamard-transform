@@ -32,7 +32,7 @@ def test_every_source_container_compresses_to_the_checked_in_cim(
     source: str, sample: Sample, tmp_path: Path
 ) -> None:
     output = tmp_path / "earth.cim"
-    Task().with_action("compress").with_input(str(sample(source))).with_output(str(output)).run()
+    Task().compress(input=str(sample(source)), output=str(output)).run()
     assert output.read_bytes() == sample("transformed_earth.cim").read_bytes()
 
 
@@ -44,9 +44,7 @@ def test_every_source_container_agrees_with_every_other_exactly(
     digests = set()
     for source in SOURCES:
         output = tmp_path / f"{source}.cim"
-        Task().with_action("compress").with_input(str(sample(source))).with_output(
-            str(output)
-        ).run()
+        Task().compress(input=str(sample(source)), output=str(output)).run()
         digests.add(output.read_bytes())
     assert len(digests) == 1
 
@@ -59,9 +57,7 @@ def test_the_checked_in_cim_extracts_to_every_checked_in_reconstruction(
     target: str, sample: Sample, tmp_path: Path
 ) -> None:
     output = tmp_path / target
-    Task().with_action("extract").with_input(str(sample("transformed_earth.cim"))).with_output(
-        str(output)
-    ).run()
+    Task().extract(input=str(sample("transformed_earth.cim")), output=str(output)).run()
     assert output.read_bytes() == sample(target).read_bytes()
 
 
@@ -70,10 +66,8 @@ def test_the_bmp_sample_round_trips_to_its_checked_in_reconstruction(
 ) -> None:
     compressed = tmp_path / "image.cim"
     restored = tmp_path / "recreated.bmp"
-    Task().with_action("compress").with_input(str(sample("image.bmp"))).with_output(
-        str(compressed)
-    ).run()
-    Task().with_action("extract").with_input(str(compressed)).with_output(str(restored)).run()
+    Task().compress(input=str(sample("image.bmp")), output=str(compressed)).run()
+    Task().extract(input=str(compressed), output=str(restored)).run()
     assert restored.read_bytes() == sample("recreated.bmp").read_bytes()
 
 
@@ -89,11 +83,44 @@ def test_the_checked_in_png_is_pinned_by_its_pixels_not_its_bytes(
     expected.load(str(sample("recreated.ppm")))
 
     fresh = tmp_path / "recreated.png"
-    Task().with_action("extract").with_input(str(sample("transformed_earth.cim"))).with_output(
-        str(fresh)
-    ).run()
+    Task().extract(input=str(sample("transformed_earth.cim")), output=str(fresh)).run()
 
     for path in (sample("recreated.png"), fresh):
         decoded = PNGImage()
         decoded.load(str(path))
         assert np.array_equal(decoded.get_array(), expected.get_array()), path
+
+
+@pytest.mark.parametrize(
+    ("source", "target"),
+    [
+        ("earth.ppm", "recreated.ppm"),
+        ("earth.tiff", "recreated.tiff"),
+        ("earth.pam", "recreated.pam"),
+        ("earth.npy", "recreated.npy"),
+        ("earth.pkl", "recreated.pkl"),
+        ("image.bmp", "recreated.bmp"),
+    ],
+)
+def test_compressing_straight_to_a_picture_writes_the_checked_in_reconstruction(
+    source: str, target: str, sample: Sample, tmp_path: Path
+) -> None:
+    """`compress(input=picture, output=picture)` skips the .cim file (0.5.1),
+    and must write what the two steps write, which is what is checked in."""
+    output = tmp_path / target
+    Task().compress(input=str(sample(source)), output=str(output)).run()
+    assert output.read_bytes() == sample(target).read_bytes()
+
+
+def test_compressing_straight_to_a_png_writes_the_checked_in_pixels(
+    sample: Sample, tmp_path: Path
+) -> None:
+    """The PNG again by its pixels, since its bytes follow the zlib build."""
+    expected = PPMImage()
+    expected.load(str(sample("recreated.ppm")))
+
+    output = tmp_path / "direct.png"
+    Task().compress(input=str(sample("earth.png")), output=str(output)).run()
+    decoded = PNGImage()
+    decoded.load(str(output))
+    assert np.array_equal(decoded.get_array(), expected.get_array())

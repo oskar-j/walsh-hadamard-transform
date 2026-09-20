@@ -32,6 +32,7 @@ to race it against, and more than seven hundred tests keep all of it honest.
   - [Command line](#command-line)
   - [Reading the PSNR figures](#reading-the-psnr-figures)
   - [As a library](#as-a-library)
+    - [Skipping the `.cim` file](#skipping-the-cim-file)
     - [Other transforms](#other-transforms)
     - [Writing your own](#writing-your-own)
   - [Examples](#examples)
@@ -153,6 +154,19 @@ walsh extract  out.cim restored.npy     # or a bare NumPy array
 walsh extract  out.cim restored.pkl     # or a pickle of rows of (r, g, b) tuples
 ```
 
+To see what the codec does to a picture without keeping the `.cim`, name a
+picture as the output of `compress`. The picture is compressed and restored in
+memory, and what is written is its lossy reconstruction, byte for byte what the
+two commands above would have produced between them:
+
+```
+walsh compress photo.ppm photo_compressed.ppm
+```
+
+The result is a picture like any other, as large as the original: it shows the
+compression, it is not the compressed data. For now the output has to be the
+file type of the input; see [Skipping the `.cim` file](#skipping-the-cim-file).
+
 Pickled pixels go in the same way, and a flat list of them, which does not
 carry its size, takes it from the command line:
 
@@ -263,9 +277,61 @@ usage error such as a missing file or an unknown option.
 ```python
 from walsh import Task
 
-Task().with_action("compress").with_input("data/bmp/image.bmp").with_output("out.cim").run()
-Task().with_action("extract").with_input("out.cim").with_output("back.bmp").run()
+Task().compress(input="data/bmp/image.bmp", output="out.cim").run()
+Task().extract(input="out.cim", output="back.bmp").run()
 ```
+
+`compress` and `extract` say what to do and name the input and the output;
+nothing is read or written until `run()`. The settings go on the `Task`
+itself, in the constructor or chained before `run()`:
+
+```python
+Task(packed_block_size=2).with_coeff_removal(40).compress(
+    input="photo.png", output="photo.cim"
+).run()
+```
+
+Up to 0.5.0 the same was spelled
+`Task().with_action("compress").with_input(...).with_output(...).run()`. Those
+three methods are gone, and so are the old argument-less `compress()` and
+`extract()`, which ran at once: each `with_action(A).with_input(X).with_output(Y)`
+becomes `A(input=X, output=Y)`.
+
+#### Skipping the `.cim` file
+
+Give `compress` a picture as its output and the `.cim` never reaches the disk:
+
+```python
+Task().compress(input="data/ppm/earth.ppm", output="earth_compressed.ppm").run()
+```
+
+The picture goes through the whole codec in memory (colour conversion,
+transform, the crop to the kept coefficients, the rounding to the container's
+16-bit integers, and back), and its lossy reconstruction is written. It is the
+same file, byte for byte, as compressing to a `.cim` and extracting that: the
+decoder is handed the very bytes the `.cim` would have held. Every setting
+applies, so it is also the short way to compare settings or transforms:
+
+```python
+for name in ("walsh", "dct", "haar"):
+    Task(transform=name).compress(input="earth.ppm", output=f"earth_{name}.ppm").run()
+```
+
+What decides is the output's suffix. A picture suffix (`.bmp`, `.png`, `.ppm`
+and the rest of the table under [File formats](#file-formats)) writes the
+reconstruction; anything else, `.cim` by convention, writes the container.
+
+**For now the output must be the file type of the input.** Another type is a
+`NotImplementedError` that says so; it is planned for 0.6.0
+([#51](https://github.com/oskar-j/walsh-hadamard-transform/issues/51)). Until
+then the two steps cross formats as they always have:
+
+```python
+Task().compress(input="earth.ppm", output="earth.cim").run()
+Task().extract(input="earth.cim", output="earth.png").run()
+```
+
+Suffixes that name one format, such as `.tif` and `.tiff`, are one type.
 
 #### Other transforms
 
@@ -283,10 +349,8 @@ ship with the package and are selected by name, in any case:
 ```python
 from walsh import Task
 
-Task(transform="dct").with_action("compress").with_input("data/ppm/earth.ppm").with_output(
-    "dct.cim"
-).run()
-Task(transform="dct").with_action("extract").with_input("dct.cim").with_output("back.ppm").run()
+Task(transform="dct").compress(input="data/ppm/earth.ppm", output="dct.cim").run()
+Task(transform="dct").extract(input="dct.cim", output="back.ppm").run()
 ```
 
 An unknown name is a `ValueError` that lists the known ones. `"dct"` and
@@ -337,9 +401,7 @@ class Hartley(MatrixTransform):
         return (np.cos(angle) + np.sin(angle)) / np.sqrt(size)
 
 
-Task(transform=Hartley()).with_action("compress").with_input("data/ppm/earth.ppm").with_output(
-    "hartley.cim"
-).run()
+Task(transform=Hartley()).compress(input="data/ppm/earth.ppm", output="hartley.cim").run()
 ```
 
 It trails the others for an instructive reason: the codec keeps the top-left
@@ -512,9 +574,7 @@ carries its own size, in any format, must match it.
 ```python
 from walsh import Task
 
-Task().with_input_size(400, 300).with_action("compress").with_input("pixels.pkl").with_output(
-    "out.cim"
-).run()
+Task().with_input_size(400, 300).compress(input="pixels.pkl", output="out.cim").run()
 ```
 
 An `object` array saved by `numpy.save`, which only

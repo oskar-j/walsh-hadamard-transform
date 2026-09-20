@@ -121,6 +121,10 @@ jobs:
           done
           /tmp/smoke/bin/walsh extract data/cim/transformed_earth.cim /tmp/smoke-earth.ppm
           cmp data/ppm/recreated.ppm /tmp/smoke-earth.ppm
+          # A picture as the output of compress skips the .cim (0.5.1) and
+          # must write the same reconstruction as the two steps above.
+          /tmp/smoke/bin/walsh compress data/ppm/earth.ppm /tmp/smoke-direct.ppm
+          cmp data/ppm/recreated.ppm /tmp/smoke-direct.ppm
           # A PNG is a zlib stream, whose bytes may differ between zlib builds,
           # so the PNG written here is compared by the pixels it decodes to.
           /tmp/smoke/bin/walsh extract data/cim/transformed_earth.cim /tmp/smoke-earth.png
