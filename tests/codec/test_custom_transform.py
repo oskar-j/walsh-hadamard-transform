@@ -184,10 +184,11 @@ def test_anything_but_a_transform_instance_is_rejected_at_construction(
         Codec(transform=not_a_transform)
 
 
-def test_negative_coeff_removal_is_rejected_when_it_is_set() -> None:
+@pytest.mark.parametrize("coeff", [-1.0, float("nan")], ids=["negative", "nan"])
+def test_invalid_coeff_removal_is_rejected_when_it_is_set(coeff: float) -> None:
     with pytest.raises(ValueError, match="non-negative"):
-        Codec().with_coeff_removal(-1.0)
-    Codec().with_coeff_removal(0.0).with_coeff_removal(None)
+        Codec().with_coeff_removal(coeff)
+    Codec().with_coeff_removal(0.0).with_coeff_removal(float("inf")).with_coeff_removal(None)
 
 
 class _Shrinks(Dct):
