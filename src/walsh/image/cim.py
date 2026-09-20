@@ -453,20 +453,26 @@ class CustomizableImage:
             cropped = [block[:packed, :packed] for block in blocks]
             self._data[channel] = np.stack(cropped) if cropped else _EMPTY_STACK
 
-    def _write_header(self, file: BinaryIO) -> None:
+    def _write_header(self, file: BinaryIO) -> dict[str, BlockDescription]:
         """Write the dimensions and the three block descriptions.
 
         Args:
             file: Stream to write to.
 
+        Returns:
+            The descriptions written, every one of them known to be set.
+
         Raises:
             ValueError: If any channel has no description set.
         """
         file.write(struct.pack(self.HEADER_FORMAT, self._width, self._height))
+        written: dict[str, BlockDescription] = {}
         for channel, description in self._descriptions.items():
             if description is None:
                 raise ValueError(f"no block description set for channel {channel!r}")
             file.write(struct.pack(self.DESCRIPTION_FORMAT, *description))
+            written[channel] = description
+        return written
 
     @staticmethod
     def _write_blocks(file: BinaryIO, blocks: Block) -> None:
@@ -482,7 +488,8 @@ class CustomizableImage:
 
         Args:
             file: Stream to write to.
-            blocks: The channel's already-cropped blocks as one stack.
+            blocks: The channel's blocks, cropped to the packed corner, as
+                one stack.
         """
         if len(blocks) == 0:
             return
@@ -529,6 +536,11 @@ class CustomizableImage:
         Raises:
             ValueError: If any channel has no description set.
         """
-        self._write_header(file)
-        for blocks in self._data.values():
-            self._write_blocks(file, blocks)
+        descriptions = self._write_header(file)
+        for channel, blocks in self._data.items():
+            # Crop here as well as in set_data: a container that came from
+            # load() holds its blocks zero-padded back to full size, and
+            # writing those under a header that declares the packed size made
+            # a file eight times too large that decoded to noise (0.5.1).
+            packed = descriptions[channel].packed_block_size
+            self._write_blocks(file, blocks[:, :packed, :packed])

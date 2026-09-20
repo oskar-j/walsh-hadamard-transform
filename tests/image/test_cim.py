@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from conftest import Sample
 from walsh.image import (
     BlockDescription,
     CustomizableImage,
@@ -384,3 +385,16 @@ def test_bytes_that_are_not_a_container_are_refused_like_a_file() -> None:
         CustomizableImage.from_bytes(b"\x10\x00\x00")
     with pytest.raises(UnsupportedFileFormatError):
         CustomizableImage.from_bytes(b"P6\n4 4\n255\n" + bytes(64))
+
+
+def test_a_container_that_was_loaded_can_be_saved_again(tmp_path: Path, sample: Sample) -> None:
+    """It could not, up to 0.5.0. A loaded container holds its blocks
+    zero-padded back to full size, and save() wrote those under a header that
+    still declared the packed size: 960,026 bytes for a 120,026-byte file,
+    which then decoded to noise. Nothing in the codec saves a container it
+    loaded, so nothing noticed until something needed to."""
+    original = sample("transformed_earth.cim")
+    again = tmp_path / "again.cim"
+    CustomizableImage.load(str(original)).save(str(again))
+    assert again.read_bytes() == original.read_bytes()
+    assert CustomizableImage.load(str(again)).to_bytes() == original.read_bytes()
