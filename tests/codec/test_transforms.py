@@ -111,6 +111,8 @@ def test_negative_coeff_is_rejected() -> None:
     """It is compared against a magnitude, so a negative value keeps everything."""
     with pytest.raises(ValueError, match="non-negative"):
         WalshHadamardTransform(coeff=-1.0)
+    with pytest.raises(ValueError, match="non-negative"):
+        WalshHadamardTransform(coeff=float("nan"))
 
 
 def test_matrix_memo_does_not_pin_transform_instances() -> None:

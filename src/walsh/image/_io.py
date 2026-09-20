@@ -165,9 +165,12 @@ def open_binary_write(source: FileSource) -> Generator[BinaryIO, None, None]:
         return
 
     mode = _target_mode(target)
-    descriptor, staged = tempfile.mkstemp(
-        dir=os.path.dirname(target), prefix=_STAGING_PREFIX, suffix=_STAGING_SUFFIX
-    )
+    try:
+        descriptor, staged = tempfile.mkstemp(
+            dir=os.path.dirname(target), prefix=_STAGING_PREFIX, suffix=_STAGING_SUFFIX
+        )
+    except OSError as error:
+        raise type(error)(error.errno, error.strerror, os.fspath(source)) from error
     try:
         with open(descriptor, "wb") as handle:
             yield handle

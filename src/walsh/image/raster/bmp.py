@@ -120,6 +120,12 @@ class BMPImage(RasterImage):
                 f"BMP dimensions must be positive, got {self._width}x{self._height}"
             )
 
+        if self._offset < 14 + self._header_size:
+            raise UnsupportedFileFormatError(
+                f"BMP pixel offset must be at least {14 + self._header_size} "
+                f"for header size {self._header_size}, got {self._offset}"
+            )
+
     def _read_data(self, file: BinaryIO) -> None:
         """Read the pixel array into the top-down RGB contract.
 

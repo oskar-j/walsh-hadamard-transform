@@ -489,6 +489,8 @@ def test_the_settings_are_the_codecs_and_are_checked_as_it_checks_them() -> None
         Vectorizer(y_block_size=12)
     with pytest.raises(ValueError, match="coeff must be non-negative"):
         Vectorizer(coeff_removal=-1.0)
+    with pytest.raises(ValueError, match="coeff must be non-negative"):
+        Vectorizer(coeff_removal=float("nan"))
     with pytest.raises(ValueError, match="unknown transform"):
         Vectorizer(transform="fourier")
     not_a_transform: Any = object()
