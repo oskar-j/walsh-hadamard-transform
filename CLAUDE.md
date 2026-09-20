@@ -144,20 +144,20 @@ while a decoder is owed what a file gives it, `int16`-rounded, clipped and
 zero-padded to full blocks; going through `_write` / `_read`, the code `save`
 / `load` use, is what makes every route to a picture identical to the
 two-step one by construction, and `test_golden.py` holds it to the checked-in `recreated.*`
-files byte for byte (PNG by pixels). **The output must be the input's file
-type for now**: anything else is a `NotImplementedError` raised by
-`compress()` itself, before anything is read and leaving the codec unchanged,
-naming 0.6.0 and issue #51 (`CROSS_FORMAT_ISSUE`). The type is the reader
-class, so `.tif`/`.tiff`, `.ppm`/`.pnm` and `.pkl`/`.pickle` do not cross,
-and stdin counts as BMP. The restriction is the maintainer's staging, not a
-technical limit: `_decode` ends in `reader_for(output)` and would write any
-format, so #51 is mostly the removal of that check plus its tests. The CLI
-inherits the feature because it builds a `Codec`
-(`walsh compress a.ppm a_lossy.ppm`), and reports the refusal as an `Error:`
-line through `_REPORTED` in `cli.py`, which adds `NotImplementedError` to
-`EXPECTED_ERRORS` for the command line only: in a library it can also mean
-broken code (an abstract `Transform` method), which should keep its
-traceback. Take it out of `_REPORTED` when nothing raises it.
+files byte for byte (PNG by pixels). **The output may be any format,
+whatever the input is** (0.5.2, #51): the codec works on pixels, and
+`_write_picture` ends in `reader_for(output)`, so the suffix alone picks the
+writer, as for `extract`. 0.5.1 had staged this, refusing a different file
+type with a `NotImplementedError` from `compress()`, and lifting it was the
+removal of that check, its constant and the CLI's handler for it, which is
+why `compress()` and `extract()` now read and check nothing at all: a name
+this package cannot handle is reported by `run()`, on either route. The
+golden test runs all 36 pairs of the sample's formats against the checked-in
+`recreated.*` for the target, and `test_direct.py` all 49 on a synthetic
+picture, BMP included. The CLI inherits the feature because it builds a
+`Codec` (`walsh compress a.ppm a_lossy.png`). Note what still decides a
+picture output: a suffix in `SUFFIXES`. `out.jpg` is not one, so it gets the
+container, as any unknown name always has.
 
 **`vectorizer.py`** (0.5.1) — `Vectorizer` is the maintainer's design: the
 codec stopped in the middle, where the picture is numbers.
@@ -697,8 +697,9 @@ name `Codec` (in `walsh/codec.py`) and the `compress(input=, output=)` /
 `extract(input=, output=)` calls, both breaking changes made on purpose and
 mapped from the old spellings in the CHANGELOG, and let
 `compress` write the reconstruction straight to a picture of the input's
-type, skipping the `.cim` file; other types are #51, for 0.6.0. It also
+type, skipping the `.cim` file. It also
 added `Vectorizer`, a picture as its coefficient vectors with statistics, and
-fixed the saving of a loaded `.cim`.
+fixed the saving of a loaded `.cim`. v0.5.2 let that direct route write any
+format from any other (#51).
 Partially based on
 https://github.com/ktisha/python2012/tree/dee4beda8e22f3a66a3e31384d4b72ab66102e88/avereshchagin

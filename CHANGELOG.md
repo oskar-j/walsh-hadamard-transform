@@ -9,6 +9,49 @@ The `## [x.y.z]` headings are load-bearing: the release workflow extracts the
 section matching the version in `pyproject.toml` and uses it as the GitHub
 Release notes.
 
+## [0.5.2]
+
+### Added
+
+- **`compress` writes a picture in any format, whatever format it read**
+  (#51). 0.5.1 let a picture be the output of `compress`, skipping the `.cim`
+  file, but only in the file type of the input:
+
+  ```python
+  Codec().compress(input="data/ppm/earth.ppm", output="earth_compressed.png").run()
+  ```
+
+  ```
+  walsh compress photo.png photo_compressed.bmp
+  ```
+
+  The codec works on pixels, which no format owns, so the output's suffix
+  alone chooses the writer, as it always has for `extract`. The result is
+  still byte for byte what compressing to a `.cim` and extracting that to the
+  same target writes.
+- The golden tests now run all 36 pairs of the sample's six formats, each
+  held to the checked-in `recreated.*` file for its target (the PNG by its
+  pixels), so where a picture came from leaves no trace in what is written.
+  A further 49 pairs, BMP included, run on a synthetic picture, and the CI
+  wheel smoke compares a PNG-to-TIFF run on the Linux runner with `cmp`.
+
+### Changed
+
+- `Codec.compress()` no longer raises `NotImplementedError`, and the message
+  that named 0.6.0 is gone with it: this shipped a release earlier than that
+  message said. `CROSS_FORMAT_ISSUE` is removed from `walsh.codec`.
+- **`compress()` and `extract()` now read and check nothing; `run()` reports
+  everything.** To compare file types, 0.5.1 had to look up the input's
+  reader inside `compress()`, so an input suffix this package cannot read was
+  refused there, early, but only when the output was a picture. It is now an
+  `UnsupportedFileFormatError` from `run()` on either route, as it always was
+  for a `.cim` output.
+- The command line no longer treats `NotImplementedError` as an expected
+  error, now that nothing of its own raises one: anywhere else it means
+  broken code, which should keep its traceback.
+
+Codec output is unchanged: every checked-in file is still reproduced exactly.
+
 ## [0.5.1]
 
 ### Changed

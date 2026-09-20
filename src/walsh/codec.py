@@ -57,10 +57,6 @@ DEFAULT_Y_BLOCK_SIZE = 8
 DEFAULT_CHROMA_BLOCK_SIZE = 16
 DEFAULT_PACKED_BLOCK_SIZE = 4
 
-#: Where writing a different file type from the one read is tracked. Until it
-#: is done, :meth:`Codec.compress` refuses it and points here.
-CROSS_FORMAT_ISSUE = "https://github.com/oskar-j/walsh-hadamard-transform/issues/51"
-
 #: Neutral fill values used when a channel carries no blocks.
 NEUTRAL_LUMA = 0
 NEUTRAL_CHROMA = 128
@@ -229,36 +225,25 @@ class Codec:
         have held. Any other name, ``.cim`` by convention, gets the spectral
         container itself.
 
+        The picture written need not be the file type of the one read
+        (0.5.2): ``photo.png`` to ``photo_compressed.bmp`` is as good as
+        ``.png`` to ``.png``. The codec works on pixels, which no format
+        owns, so the output's suffix alone chooses its writer, exactly as it
+        does for :meth:`extract`.
+
         Args:
             input: Picture to read, its format taken from the suffix, or
                 ``None`` to read a BMP from ``sys.stdin``, which the CLI
                 never does; see :data:`~walsh.image.FileSource`.
-            output: Where to write: a ``.cim`` path, a picture path of the
-                same file type as ``input``, or ``None`` to write the
-                container to stdout.
+            output: Where to write: a ``.cim`` path, a picture path in any
+                supported format, or ``None`` to write the container to
+                stdout.
 
         Returns:
-            This codec, so calls can be chained.
-
-        Raises:
-            NotImplementedError: If ``output`` is a picture of a different
-                file type from ``input``, such as ``.ppm`` to ``.png``. That
-                is planned for 0.6.0; until then compress to a ``.cim`` and
-                extract it, which crosses formats freely. Suffixes that share
-                a reader, such as ``.tif`` and ``.tiff``, are one type.
-            UnsupportedFileFormatError: If ``output`` is a picture and the
-                suffix of ``input`` is not a format this package reads.
+            This codec, so calls can be chained. Nothing is read or checked
+            here: an input or output this package cannot handle is reported
+            by :meth:`run`, whichever route it takes.
         """
-        if self._writes_a_picture(output) and type(reader_for(input)) is not type(
-            reader_for(output)
-        ):
-            suffix = Path(str(output)).suffix.lower()
-            raise NotImplementedError(
-                f"cannot compress {str(input)!r} straight to {str(output)!r}: writing a "
-                f"different file type from the one read is not implemented yet and is "
-                f"planned for 0.6.0 ({CROSS_FORMAT_ISSUE}). Until then keep the file type, "
-                f"or compress to a .cim and extract that to {suffix}"
-            )
         self._action, self._input, self._output = Action.COMPRESS, input, output
         return self
 

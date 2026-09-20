@@ -21,14 +21,6 @@ __all__ = ["main"]
 
 CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 
-#: What the command line reports as an ``Error:`` line rather than a traceback.
-#: ``NotImplementedError`` is added here and not to ``EXPECTED_ERRORS``: from
-#: the command line its one source is a picture output of a different file
-#: type from the input, which 0.6.0 will implement, whereas in a library it
-#: can also mean broken code, which should keep its traceback. It leaves this
-#: tuple when nothing raises it any more.
-_REPORTED: tuple[type[BaseException], ...] = (*EXPECTED_ERRORS, NotImplementedError)
-
 _INPUT_FILE = click.Path(exists=True, dir_okay=False, readable=True)
 _OUTPUT_FILE = click.Path(dir_okay=False, writable=True)
 
@@ -77,11 +69,11 @@ def _run(configure: Callable[[], Codec]) -> None:
     Raises:
         click.ClickException: If building or running the codec fails for a
             reason the user can act on, such as bad block sizes, a missing
-            or malformed input file, or a conversion not implemented yet.
+            or malformed input file.
     """
     try:
         configure().run()
-    except _REPORTED as error:
+    except EXPECTED_ERRORS as error:
         raise click.ClickException(str(error)) from error
 
 
@@ -172,11 +164,11 @@ def compress(
 ) -> None:
     """Transform a raster image into a .cim file, or see what that does to it.
 
-    Name OUTPUT as a picture of the same type as INPUT, photo_lossy.ppm for
-    photo.ppm, and the .cim file is skipped: the picture is compressed and
-    restored in memory, and what is written is its lossy reconstruction,
-    exactly what extracting the .cim would have produced. A different
-    picture type is not supported yet; go through a .cim for that.
+    Name OUTPUT as a picture, photo_lossy.ppm or photo_lossy.png, and the
+    .cim file is skipped: the picture is compressed and restored in memory,
+    and what is written is its lossy reconstruction, exactly what extracting
+    the .cim would have produced. It may be any supported format, whatever
+    format INPUT is in.
 
     The input format is taken from the filename suffix: .bmp, .png, .ppm,
     .pnm, .pam, .tif, .tiff, .npy for a bare NumPy array, or .pkl / .pickle
@@ -186,8 +178,8 @@ def compress(
     \f
     Args:
         input_path: Image to read.
-        output_path: Path of the .cim file to write, or of a picture of the
-            input's own type to write the reconstruction to.
+        output_path: Path of the .cim file to write, or of a picture in any
+            supported format to write the reconstruction to.
         y_block_size: Block edge for the luma channel.
         chroma_block_size: Block edge for both chroma channels.
         packed_block_size: Coefficients kept per axis. This is the lossy knob.
@@ -196,8 +188,8 @@ def compress(
         height: Declared height of the input, or ``None``.
 
     Raises:
-        click.ClickException: If the image cannot be read or is malformed, is
-            not the declared size, or OUTPUT is a picture of another type.
+        click.ClickException: If the image cannot be read or is malformed, or
+            is not the declared size.
         click.UsageError: If OUTPUT names the same file as INPUT, or only one
             of --width and --height is given.
     """

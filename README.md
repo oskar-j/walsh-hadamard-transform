@@ -162,11 +162,12 @@ two commands above would have produced between them:
 
 ```
 walsh compress photo.ppm photo_compressed.ppm
+walsh compress photo.ppm photo_compressed.png    # or in any other format
 ```
 
 The result is a picture like any other, as large as the original: it shows the
-compression, it is not the compressed data. For now the output has to be the
-file type of the input; see [Skipping the `.cim` file](#skipping-the-cim-file).
+compression, it is not the compressed data. See
+[Skipping the `.cim` file](#skipping-the-cim-file).
 
 Pickled pixels go in the same way, and a flat list of them, which does not
 carry its size, takes it from the command line:
@@ -319,17 +320,18 @@ What decides is the output's suffix. A picture suffix (`.bmp`, `.png`, `.ppm`
 and the rest of the table under [File formats](#file-formats)) writes the
 reconstruction; anything else, `.cim` by convention, writes the container.
 
-**For now the output must be the file type of the input.** Another type is a
-`NotImplementedError` that says so; it is planned for 0.6.0
-([#51](https://github.com/oskar-j/walsh-hadamard-transform/issues/51)). Until
-then the two steps cross formats as they always have:
+The picture written need not be the format of the picture read. The codec
+works on pixels, which no format owns, so the output's suffix alone chooses the
+writer, as it does for `extract`:
 
 ```python
-Codec().compress(input="earth.ppm", output="earth.cim").run()
-Codec().extract(input="earth.cim", output="earth.png").run()
+Codec().compress(input="earth.ppm", output="earth_compressed.png").run()
+Codec().compress(input="photo.png", output="photo_compressed.bmp").run()
 ```
 
-Suffixes that name one format, such as `.tif` and `.tiff`, are one type.
+All 36 pairs of the sample's formats are in the golden tests, each held to the
+checked-in reconstruction for its target, so where a picture came from leaves
+no trace in what is written.
 
 #### Looking at the vectors
 

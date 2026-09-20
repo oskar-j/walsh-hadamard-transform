@@ -91,36 +91,33 @@ def test_the_checked_in_png_is_pinned_by_its_pixels_not_its_bytes(
         assert np.array_equal(decoded.get_array(), expected.get_array()), path
 
 
-@pytest.mark.parametrize(
-    ("source", "target"),
-    [
-        ("earth.ppm", "recreated.ppm"),
-        ("earth.tiff", "recreated.tiff"),
-        ("earth.pam", "recreated.pam"),
-        ("earth.npy", "recreated.npy"),
-        ("earth.pkl", "recreated.pkl"),
-        ("image.bmp", "recreated.bmp"),
-    ],
-)
-def test_compressing_straight_to_a_picture_writes_the_checked_in_reconstruction(
+@pytest.mark.parametrize("target", [name.replace("earth", "recreated") for name in SOURCES])
+@pytest.mark.parametrize("source", SOURCES)
+def test_compressing_any_sample_straight_to_any_format_writes_what_is_checked_in(
     source: str, target: str, sample: Sample, tmp_path: Path
 ) -> None:
     """`compress(input=picture, output=picture)` skips the .cim file (0.5.1),
-    and must write what the two steps write, which is what is checked in."""
+    in any pair of formats (0.5.2, #51). All 36: each must write the
+    checked-in reconstruction for its target, byte for byte, whichever
+    container the picture arrived in. The PNG is again held to its pixels,
+    since its bytes follow the zlib build."""
     output = tmp_path / target
     Codec().compress(input=str(sample(source)), output=str(output)).run()
-    assert output.read_bytes() == sample(target).read_bytes()
+
+    if target.endswith(".png"):
+        expected, decoded = PPMImage(), PNGImage()
+        expected.load(str(sample("recreated.ppm")))
+        decoded.load(str(output))
+        assert np.array_equal(decoded.get_array(), expected.get_array())
+    else:
+        assert output.read_bytes() == sample(target).read_bytes()
 
 
-def test_compressing_straight_to_a_png_writes_the_checked_in_pixels(
+def test_the_bmp_sample_goes_straight_to_its_checked_in_reconstruction(
     sample: Sample, tmp_path: Path
 ) -> None:
-    """The PNG again by its pixels, since its bytes follow the zlib build."""
-    expected = PPMImage()
-    expected.load(str(sample("recreated.ppm")))
-
-    output = tmp_path / "direct.png"
-    Codec().compress(input=str(sample("earth.png")), output=str(output)).run()
-    decoded = PNGImage()
-    decoded.load(str(output))
-    assert np.array_equal(decoded.get_array(), expected.get_array())
+    """`image.bmp` is a different picture from the Blue Marble, with its own
+    checked-in result."""
+    output = tmp_path / "recreated.bmp"
+    Codec().compress(input=str(sample("image.bmp")), output=str(output)).run()
+    assert output.read_bytes() == sample("recreated.bmp").read_bytes()
