@@ -37,7 +37,7 @@ The first release with a fix from outside: all three are
 
 ### Added
 
-- A **Contributors** table in the README.
+- A **Contributors** list in the README.
 
 ## [0.5.2]
 

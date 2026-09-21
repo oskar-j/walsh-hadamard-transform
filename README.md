@@ -98,27 +98,8 @@ the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ### Contributors
 
-Everyone whose work is in the package, with thanks.
-
-<table>
-  <tr>
-    <td align="center" width="180">
-      <a href="https://github.com/oskar-j"><img src="https://avatars.githubusercontent.com/u/4602830?v=4&s=100" width="100" height="100" alt="Oskar Jarczyk"><br><b>Oskar Jarczyk</b></a><br>
-      <sub><a href="https://github.com/oskar-j">@oskar-j</a></sub>
-    </td>
-    <td align="center" width="180">
-      <a href="https://github.com/DYNOSuprovo"><img src="https://avatars.githubusercontent.com/u/143953131?v=4&s=100" width="100" height="100" alt="Suprovo Mallick"><br><b>Suprovo Mallick</b></a><br>
-      <sub><a href="https://github.com/DYNOSuprovo">@DYNOSuprovo</a></sub>
-    </td>
-  </tr>
-  <tr>
-    <td align="center">🛠️ author and maintainer</td>
-    <td align="center">🐛 three fixes in <a href="https://github.com/oskar-j/walsh-hadamard-transform/blob/master/CHANGELOG.md">0.5.3</a> (<a href="https://github.com/oskar-j/walsh-hadamard-transform/pull/72">#72</a>)</td>
-  </tr>
-</table>
-
-A merged pull request earns a cell here: add yourself in the same PR, or the
-maintainer will at the next release.
+- [Oskar Jarczyk](https://github.com/oskar-j), author and maintainer
+- [Suprovo Mallick](https://github.com/DYNOSuprovo)
 
 ## Acknowledgement
 
