@@ -9,6 +9,36 @@ The `## [x.y.z]` headings are load-bearing: the release workflow extracts the
 section matching the version in `pyproject.toml` and uses it as the GitHub
 Release notes.
 
+## [0.5.3]
+
+The first release with a fix from outside: all three are
+[@DYNOSuprovo](https://github.com/DYNOSuprovo)'s (#72), closing #70.
+
+### Fixed
+
+- **`--coeff-removal nan` was accepted and did nothing.** The guard was
+  `coeff < 0`, which NaN fails, and `np.abs(spectrum) < nan` is false
+  everywhere, so the run kept every coefficient at exit 0: the outcome the
+  guard's own docstring says it exists to prevent. It is `not (coeff >= 0)`
+  now, in both places that had it, `Codec.with_coeff_removal` and
+  `WalshHadamardTransform.__init__`. `inf` is still accepted: it zeroes
+  everything, which is an extreme of the knob and not a silent no-op.
+- **A BMP whose pixel offset points inside its own header is refused.**
+  `bfOffBits` was seeked to unchecked, so an offset below `14 + biSize`
+  decoded the header's bytes as the bottom row of a shifted picture, with no
+  error. It is rejected by name, as the signature, the bit depth and the
+  dimensions already were.
+- **A write that cannot be staged names the file that was asked for.** When
+  the staging file could not be created (a mistyped output folder, one without
+  write permission, a symlink into a missing one), the error named the
+  `.walsh-*.tmp` file, which never existed afterwards, and not the
+  destination. The `OSError` keeps its type and errno and carries the path
+  the caller gave, as it did before 0.4.2.
+
+### Added
+
+- A **List of contributors** in the README.
+
 ## [0.5.2]
 
 ### Added
