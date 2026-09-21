@@ -187,6 +187,8 @@ def test_anything_but_a_transform_instance_is_rejected_at_construction(
 def test_negative_coeff_removal_is_rejected_when_it_is_set() -> None:
     with pytest.raises(ValueError, match="non-negative"):
         Codec().with_coeff_removal(-1.0)
+    with pytest.raises(ValueError, match="non-negative"):
+        Codec().with_coeff_removal(float("nan"))
     Codec().with_coeff_removal(0.0).with_coeff_removal(None)
 
 

@@ -333,7 +333,7 @@ class Codec:
                 magnitude, so a negative value could only be a mistake: it
                 would silently keep everything.
         """
-        if coeff is not None and coeff < 0:
+        if coeff is not None and not (coeff >= 0):
             raise ValueError(f"coeff must be non-negative, got {coeff}")
         self._coeff_removal = coeff
         return self

@@ -146,3 +146,32 @@ def test_bmp_rejects_non_positive_dimensions(tmp_path: Path, width: int, height:
 
     with pytest.raises(UnsupportedFileFormatError, match="dimensions must be positive"):
         BMPImage().load(str(path))
+
+
+@pytest.mark.parametrize("offset", [0, 20, 53])
+def test_bmp_rejects_offset_inside_header(tmp_path: Path, offset: int) -> None:
+    """Pixel data cannot legally begin before the file and info headers end."""
+    header = struct.pack(
+        BMP_HEADER_FORMAT,
+        BMP_SIGNATURE,
+        100,
+        0,
+        0,
+        offset,
+        40,
+        2,
+        2,
+        1,
+        24,
+        0,
+        12,
+        2835,
+        2835,
+        0,
+        0,
+    )
+    path = tmp_path / "bad_offset.bmp"
+    path.write_bytes(header + b"\x00" * 64)
+
+    with pytest.raises(UnsupportedFileFormatError, match="pixel offset must be at least 54"):
+        BMPImage().load(str(path))

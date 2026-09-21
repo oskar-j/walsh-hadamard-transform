@@ -144,6 +144,18 @@ def test_coeff_removal_changes_the_output_only_when_it_bites(
     assert len(outputs["500"]) == len(default.read_bytes())
 
 
+@pytest.mark.parametrize("coeff", ["nan", "NaN", "-1"])
+def test_coeff_removal_invalid_value_is_rejected(
+    runner: CliRunner, gradient_bmp: Path, tmp_path: Path, coeff: str
+) -> None:
+    output = tmp_path / "out.cim"
+    result = runner.invoke(
+        main, ["compress", "--coeff-removal", coeff, str(gradient_bmp), str(output)]
+    )
+    assert result.exit_code == 1
+    assert "Error: coeff must be non-negative" in result.output
+
+
 @pytest.mark.parametrize("flag", ["-v", "-vv"])
 def test_verbose_flags_are_accepted(
     runner: CliRunner, flag: str, gradient_bmp: Path, tmp_path: Path
