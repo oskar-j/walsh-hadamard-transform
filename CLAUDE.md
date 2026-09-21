@@ -703,6 +703,6 @@ fixed the saving of a loaded `.cim`. v0.5.2 let that direct route write any
 format from any other (#51). v0.5.3 shipped the first outside contribution (#72, closing #70):
 NaN refused as a coefficient threshold, a BMP pixel offset inside the header
 refused, and a failed staging naming the destination; the README gained a
-Contributors list.
+List of contributors.
 Partially based on
 https://github.com/ktisha/python2012/tree/dee4beda8e22f3a66a3e31384d4b72ab66102e88/avereshchagin

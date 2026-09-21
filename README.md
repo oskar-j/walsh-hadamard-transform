@@ -25,7 +25,7 @@ to race it against, and more than seven hundred tests keep all of it honest.
 - [Description](#description)
   - [How it works, in one picture](#how-it-works-in-one-picture)
 - [Contributing](#contributing)
-  - [Contributors](#contributors)
+  - [List of contributors](#list-of-contributors)
 - [Acknowledgement](#acknowledgement)
 - [Installation](#installation)
   - [Development](#development)
@@ -96,7 +96,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the development setup, the checks CI
 runs, and the conventions this codebase follows. Participation is covered by
 the [Code of Conduct](CODE_OF_CONDUCT.md).
 
-### Contributors
+### List of contributors
 
 - :octocat: [Oskar Jarczyk](https://github.com/oskar-j)
 - :octocat: [Suprovo Mallick](https://github.com/DYNOSuprovo)
