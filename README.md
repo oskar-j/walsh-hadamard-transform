@@ -98,8 +98,8 @@ the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ### List of contributors
 
-- :octocat: [Oskar Jarczyk](https://github.com/oskar-j)
-- :octocat: [Suprovo Mallick](https://github.com/DYNOSuprovo)
+- :octocat: [@oskar-j](https://github.com/oskar-j)
+- :octocat: [@DYNOSuprovo](https://github.com/DYNOSuprovo)
 
 ## Acknowledgement
 
