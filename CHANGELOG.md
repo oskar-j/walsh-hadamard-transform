@@ -9,6 +9,98 @@ The `## [x.y.z]` headings are load-bearing: the release workflow extracts the
 section matching the version in `pyproject.toml` and uses it as the GitHub
 Release notes.
 
+## [0.5.4]
+
+A small file can no longer make a reader allocate, or read, much more than
+the file holds. Three readers took a size from their header and trusted it,
+each in its own way: the `.cim` container (#55), PPM and PAM (#56), and TIFF
+(#57).
+
+### Fixed
+
+- **A `.cim` header can no longer declare more than a picture the format can
+  hold.** Closes #55. Two fields were unbounded. The block edge was checked
+  for being a power of two, but not against the ceiling of 128 that `compress`
+  has kept since 0.4.11. A 131 KB file declaring 65535 blocks of edge 32768
+  had the reader ask for 512 TiB and fail with a `MemoryError` traceback. A
+  28-byte file holding one block of 8192 cost about two minutes of CPU and
+  2 GB before writing a one-pixel picture. And a channel with no blocks is
+  exempt from the rule that ties the count to the dimensions, so a 26-byte
+  file with all three channels empty could declare any size the two `<I`
+  fields hold, and `extract` filled it with grey: 4000x4000 wrote a 48 MB
+  BMP, and anything larger ran out of memory. Now an edge above
+  `MAX_BLOCK_SIZE` is refused by name, and so are dimensions that would cut
+  any channel into more than 65535 blocks, whatever count it declares, which
+  is the limit `compress` has enforced since 0.4.6. An empty channel keeps
+  its meaning. Together the two rules close the bound 0.4.7 left open: what a
+  header can make the reader allocate is now proportional to a picture the
+  format can describe.
+- **A PPM or PAM header can no longer make the reader ask for all of its
+  declared pixels at once.** Closes #56. Nothing bounds a Netpbm width or
+  height, and the shared raster reader passed their product straight to
+  `file.read`, which allocates before it reads. A 32-byte PPM declaring
+  2000000000x2000000000 raised `OverflowError`, a traceback rather than an
+  `Error:` line. One declaring 100000x10000 asked for 3 GB before finding
+  three bytes. The read goes through `read_up_to` now, like the BMP, `.npy`,
+  PNG and `.cim` readers, so memory follows what the file holds and every
+  such file is `truncated PPM data` or `truncated PAM data`.
+- **A TIFF can no longer make the reader read more than the file holds.**
+  Closes #57. It is the one reader that seeks, so it measures the file once
+  and holds three things to that length:
+  - **The pixels an image declares.** The strip clamp of 0.4.5 bounds the
+    reads by the declared dimensions, and those come from the file too. A
+    1 MB file whose 512 strips all pointed at one region loaded without error
+    as a 16384x10922 picture, that megabyte 512 times over, for a gigabyte of
+    memory. `compress` refused it only because a picture that size overflows
+    the `.cim` block count at the default block sizes. With 128-pixel blocks
+    it fits, and `TIFFImage().load` handed it to any library caller as it
+    was. An uncompressed image cannot hold more pixel bytes than its file, so
+    declaring more is refused before any strip is read. The clamp itself is
+    unchanged, so a final strip padded to whole rows still loads.
+  - **Every out-of-line value, before it is read.** A 32-bit count sized a
+    bare `file.read`, so a 22-byte file asked for 4 GiB and only then
+    reported that the field ran past the end.
+  - **Only the ten tags the profile reads are decoded.** Every other entry
+    is walked past without its value being looked at, as the TIFF
+    specification asks of a reader that does not know a field. Each entry
+    used to be decoded and kept, so a 200 KB directory of 16,384 entries over
+    one region cost ten seconds of CPU. It takes milliseconds now.
+
+### Changed
+
+- The TIFF reader is stricter about the tags it reads and lets the rest go:
+  - **A tag it does not read no longer refuses a picture**, even with a
+    field type no TIFF defines, a count that runs past the end of the file,
+    or an offset beyond it. Nothing about such an entry is used beyond its
+    tag.
+  - **A tag it reads may appear only once.** A directory with two strip
+    tables, or two widths, describes no single image, and the last copy used
+    to win without a word.
+  - **A tag it reads must be a BYTE, SHORT or LONG**, which every one of them
+    is in the specification. Another type used to decode to nothing, so the
+    tag counted as absent and its default applied: a Compression field
+    stored as a signed SHORT read as uncompressed.
+- A large TIFF cut short now reports that it declares more pixel bytes than
+  the whole file holds, rather than naming the first short strip. A smaller
+  one, whose pixels would fit, still names the strip.
+- Reading a PPM or PAM costs one more copy of the raster: about 10 ms for a
+  2000x2000 picture, 1% of compressing it. The BMP, `.npy` and `.cim`
+  readers already pay the same for the same bound.
+
+### Tests
+
+- The "allocation bomb" cases in `test_cim.py` and `test_cli.py` used an
+  edge of 65535, which the power-of-two rule refuses before its size
+  matters, so neither pinned what its name claimed. Both now use a power of
+  two in a self-consistent header.
+- The allocation bounds are asserted with `tracemalloc`, as the PNG
+  reader's already were, not inferred from an error message: a PPM, a PAM
+  and two TIFF directories each peak under 4 MB where 0.5.3 took 23 MB to
+  67 MB.
+- 917 to 936 tests. 21 of the new assertions fail against 0.5.3.
+
+Codec output is unchanged: every checked-in file is still reproduced exactly.
+
 ## [0.5.3]
 
 The first release with a fix from outside: all three are

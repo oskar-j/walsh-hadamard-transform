@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import struct
+import tracemalloc
 from pathlib import Path
 
 import pytest
@@ -236,6 +237,143 @@ def test_strips_beyond_the_declared_pixels_are_rejected(tmp_path: Path) -> None:
     )
 
     with pytest.raises(UnsupportedFileFormatError, match="lies beyond the 192 bytes"):
+        TIFFImage().load(str(path))
+
+
+def test_strips_that_reread_one_region_cannot_outgrow_the_file(tmp_path: Path) -> None:
+    """The clamp above bounds the pixels by the dimensions the header
+    declares, which the file chooses. Declare enough of them and it stops
+    biting: a 1 MB file whose 512 strips all pointed at one region loaded as
+    a 16384x10922 picture, that megabyte repeated, with no error (#57). An
+    uncompressed image cannot hold more pixel bytes than its file; this is
+    the same shape at a size a test can afford, 12 strips over 4 KB."""
+    region = bytes(range(256)) * 16
+    path = tmp_path / "repeated.tif"
+    path.write_bytes(
+        build_tiff_with_strip_table(
+            128, 128, offsets=[0] * 12, counts=[len(region)] * 12, payload=region
+        )
+    )
+    size = path.stat().st_size
+    assert 12 * len(region) == 128 * 128 * 3 > size
+
+    with pytest.raises(
+        UnsupportedFileFormatError,
+        match=f"a 128x128 image, 49152 bytes of pixels, but the whole file is {size} bytes",
+    ):
+        TIFFImage().load(str(path))
+
+
+def _ifd_of(*entries: bytes) -> bytes:
+    """A little-endian header and one directory holding ``entries`` verbatim."""
+    return (
+        struct.pack("<2sHI", b"II", 42, 8)
+        + struct.pack("<H", len(entries))
+        + b"".join(entries)
+        + struct.pack("<I", 0)
+    )
+
+
+def test_an_out_of_line_value_is_checked_against_the_file_before_it_is_read(
+    tmp_path: Path,
+) -> None:
+    """``count`` is a 32-bit field and ``file.read(n)`` allocates n bytes
+    before reading any, so a file this size could ask for 4 GiB, or 34 GB in
+    DOUBLEs, and only then report that the field ran past the end (#57)."""
+    path = tmp_path / "long.tif"
+    path.write_bytes(_ifd_of(_entry("<", 273, 4, 2**24) + struct.pack("<I", 0)))
+    assert path.stat().st_size == 26
+
+    tracemalloc.start()
+    try:
+        with pytest.raises(
+            UnsupportedFileFormatError, match="TIFF field at offset 0 runs past the end"
+        ):
+            TIFFImage().load(str(path))
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert peak < 1_000_000
+
+
+@pytest.mark.parametrize(
+    ("entry", "name"),
+    [
+        ((50000, 4, 2**24, 8), "a count running 64 MiB past the end of the file"),
+        ((50000, 99, 1, 0), "a field type no TIFF defines"),
+        ((50000, 3, 4, 2**31), "an offset beyond the end of the file"),
+    ],
+)
+def test_a_tag_this_profile_never_reads_is_never_decoded(
+    entry: tuple[int, int, int, int], name: str, tmp_path: Path
+) -> None:
+    """Each of these used to refuse a picture that did not need the field,
+    and the first asked for its 64 MiB before doing so. The specification
+    asks a reader to skip a field it does not know, and now nothing about
+    one is even looked at beyond its tag (#57)."""
+    pixels = gradient_pixels(3, 2)
+    path = tmp_path / "junk.tif"
+    path.write_bytes(build_tiff(3, 2, pixels, extra_entries=[entry]))
+
+    image = TIFFImage()
+    image.load(str(path))
+    assert image.get_raw_data() == pixels, name
+
+
+@pytest.mark.parametrize(
+    ("tag", "written", "field_type", "name"),
+    [
+        (259, 3, 8, "Compression as a signed SHORT, which read as absent meant none"),
+        (256, 4, 5, "ImageWidth as a RATIONAL, which read as absent was 'missing'"),
+    ],
+)
+def test_a_tag_this_profile_reads_must_be_an_unsigned_integer(
+    tag: int, written: int, field_type: int, name: str, tmp_path: Path
+) -> None:
+    """Every tag the profile reads is a SHORT or a LONG. Another type used to
+    decode to nothing, so the tag counted as absent and its default applied,
+    and a compressed file could have been read as raw pixels."""
+    data = build_tiff(2, 2, gradient_pixels(2, 2))
+    entry = _entry("<", tag, written, 1)
+    assert data.count(entry) == 1
+    path = tmp_path / "typed.tif"
+    path.write_bytes(data.replace(entry, _entry("<", tag, field_type, 1)))
+    with pytest.raises(
+        UnsupportedFileFormatError, match=f"TIFF tag {tag} has field type {field_type}"
+    ):
+        TIFFImage().load(str(path))
+
+
+def test_many_entries_over_one_region_cost_nothing(tmp_path: Path) -> None:
+    """Every entry's value used to be decoded and kept, before the profile
+    was even checked: 200 junk entries over one region of a 264 KB file cost
+    100 MiB. 200 entries of 12 KB each, over the same 12 KB, here (#57)."""
+    pixels = gradient_pixels(64, 64)
+    junk = [(40000 + index, 4, 3000, 8) for index in range(200)]
+    path = tmp_path / "junk.tif"
+    path.write_bytes(build_tiff(64, 64, pixels, extra_entries=junk))
+    assert path.stat().st_size > 8 + 3000 * 4
+
+    tracemalloc.start()
+    try:
+        image = TIFFImage()
+        image.load(str(path))
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert image.get_raw_data() == pixels
+    assert peak < 1_000_000
+
+
+def test_a_tag_this_profile_reads_may_appear_only_once(tmp_path: Path) -> None:
+    """Two strip tables describe no single image, and the last used to win
+    without a word. Decoding every copy also let 16,384 of them, each over
+    the same region of a 200 KB file, cost ten seconds (#57)."""
+    path = tmp_path / "twice.tif"
+    path.write_bytes(build_tiff(2, 2, gradient_pixels(2, 2), extra_entries=[(273, 4, 1, 8)]))
+    with pytest.raises(
+        UnsupportedFileFormatError, match="TIFF directory holds tag 273 more than once"
+    ):
         TIFFImage().load(str(path))
 
 

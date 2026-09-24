@@ -38,7 +38,8 @@ COEFF_MAX = int(np.iinfo(COEFF_DTYPE).max)
 #: The orthonormal transform of a flat block scales its mean by the edge, so
 #: an all-255 block of edge ``e`` has DC ``255 * e``; above this edge that
 #: overflows ``COEFF_MAX`` and the clip on write would silently halve it,
-#: returning a white picture mid-grey. 128 at ``int16``.
+#: returning a white picture mid-grey. 128 at ``int16``. The reader holds a
+#: header to it as well, which is what bounds the stack one block can cost.
 MAX_BLOCK_SIZE = COEFF_MAX // 255
 
 #: Channel keys, in the order they appear on disk.
@@ -168,11 +169,22 @@ class CustomizableImage:
 
         1. both dimensions are positive;
         2. per channel, the block size is a positive power of two, which the
-           transform requires anyway;
+           transform requires anyway, and at most ``MAX_BLOCK_SIZE``, the
+           writer's own limit;
         3. the packed size is at least 1 and no larger than the block;
-        4. the block count is either 0, the "empty channel" state that
+        4. a plane of these dimensions is cut into no more blocks than the
+           count field can hold, whatever count this channel declares;
+        5. the block count is either 0, the "empty channel" state that
            :meth:`~walsh.codec.Codec.extract` fills with a neutral value, or
            exactly the count a plane of these dimensions is cut into.
+
+        Rules 2 and 4 are what bound the allocation a header can buy to a
+        picture the format can describe. Without the first, a 131 KB file
+        declared blocks of edge 32768 and the reader asked for 512 TiB;
+        without the second, a 26-byte file whose channels were all empty
+        could declare any size the two ``<I`` fields hold, since an empty
+        channel is exempt from rule 5, and the decoder filled a plane that
+        large with a neutral value.
 
         It runs after all three descriptions are read, so a file cut short in
         the header is still reported as truncated rather than inconsistent.
@@ -195,6 +207,12 @@ class CustomizableImage:
                     f"invalid .cim {channel} block description: block size {original} "
                     f"is not a positive power of two"
                 )
+            if original > MAX_BLOCK_SIZE:
+                raise UnsupportedFileFormatError(
+                    f"invalid .cim {channel} block description: block size {original} "
+                    f"is larger than {MAX_BLOCK_SIZE}, the largest whose coefficients "
+                    f"fit the container's int16 fields"
+                )
             if packed > original:
                 raise UnsupportedFileFormatError(
                     f"invalid .cim block description: packed size {packed} exceeds "
@@ -206,6 +224,12 @@ class CustomizableImage:
                     f"at least 1, got {packed}"
                 )
             expected = blocks_for(self._width, self._height, original)
+            if expected > MAX_BLOCKS_PER_CHANNEL:
+                raise UnsupportedFileFormatError(
+                    f"invalid .cim {channel} block description: a {self._width}x{self._height} "
+                    f"image in {original}-pixel blocks needs {expected} blocks, and a .cim "
+                    f"channel holds at most {MAX_BLOCKS_PER_CHANNEL}"
+                )
             if count not in (0, expected):
                 raise UnsupportedFileFormatError(
                     f"invalid .cim {channel} block description: {count} blocks declared, "

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import struct
 from pathlib import Path
 
 import pytest
@@ -297,9 +298,20 @@ def test_a_failed_extract_leaves_the_existing_output_intact(
     ("name", "data"),
     [
         (
+            # 65535 blocks of edge 32768, one coefficient each: 131 KB of
+            # file asked for 512 TiB, and MemoryError is not an Error: line.
             "allocation bomb",
-            b"\x08\x00\x00\x00\x08\x00\x00\x00\xff\xff\x00\x00\xff\xff"
-            + b"\x10\x00\x04\x00\x00\x00" * 2,
+            struct.pack("<II", 255 * 32768, 257 * 32768)
+            + struct.pack("<HHH", 32768, 1, 255 * 257)
+            + struct.pack("<HHH", 32768, 1, 0) * 2
+            + b"\x01\x00" * (255 * 257),
+        ),
+        (
+            # 26 bytes, every channel empty, a picture of 30 PiB to fill.
+            "empty channels declaring any size",
+            struct.pack("<II", 4294967295, 1000000)
+            + struct.pack("<HHH", 8, 4, 0)
+            + struct.pack("<HHH", 16, 4, 0) * 2,
         ),
         ("zero width", b"\x00\x00\x00\x00\x10\x00\x00\x00" + b"\x08\x00\x04\x00\x00\x00" * 3),
         ("zero height", b"\x10\x00\x00\x00\x00\x00\x00\x00" + b"\x08\x00\x04\x00\x00\x00" * 3),
@@ -322,6 +334,34 @@ def test_malformed_cim_geometry_is_a_clean_error(
     assert result.exit_code == 1, (name, result.output, result.exception)
     assert "Error: invalid .cim" in result.output, (name, result.output)
     assert not (tmp_path / "out.bmp").exists()
+
+
+@pytest.mark.parametrize(
+    ("name", "data", "match"),
+    [
+        # 32 bytes declaring 2000000000x2000000000: file.read() raised
+        # OverflowError, which is not an Error: line.
+        ("huge.ppm", b"P6\n2000000000 2000000000\n255\n\x01\x02\x03", "truncated PPM data"),
+        (
+            "huge.pam",
+            b"P7\nWIDTH 2000000000\nHEIGHT 2000000000\nDEPTH 3\nMAXVAL 255\n"
+            b"TUPLTYPE RGB\nENDHDR\n\x01\x02\x03",
+            "truncated PAM data",
+        ),
+    ],
+)
+def test_a_netpbm_header_declaring_billions_of_pixels_is_a_clean_error(
+    runner: CliRunner, tmp_path: Path, name: str, data: bytes, match: str
+) -> None:
+    """Under CliRunner the OverflowError produced exit 1 and no output at all."""
+    path = tmp_path / name
+    path.write_bytes(data)
+
+    result = runner.invoke(main, ["compress", str(path), str(tmp_path / "out.cim")])
+
+    assert result.exit_code == 1, (result.output, result.exception)
+    assert f"Error: {match}" in result.output
+    assert not (tmp_path / "out.cim").exists()
 
 
 def test_a_raster_image_given_to_extract_fails_fast(

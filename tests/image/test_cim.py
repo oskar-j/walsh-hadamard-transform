@@ -10,6 +10,8 @@ import pytest
 
 from conftest import Sample
 from walsh.image import (
+    MAX_BLOCK_SIZE,
+    MAX_BLOCKS_PER_CHANNEL,
     BlockDescription,
     CustomizableImage,
     UnsupportedFileFormatError,
@@ -132,12 +134,31 @@ def test_set_data_before_descriptions_is_an_error() -> None:
             "5 blocks declared, but a 16x16 image in 8-pixel blocks has 4",
         ),
         (
-            # The bomb from #22: 65535 blocks of 65535x65535 would be 2 PiB.
-            "a 26-byte allocation bomb",
+            # The bomb from #22 had an edge of 65535, which the power-of-two
+            # rule refuses before its size matters. A power of two does not:
+            # this one block of 32768, one coefficient kept, was 8 GiB (#55).
+            "a 28-byte allocation bomb",
+            struct.pack("<II", 1, 1)
+            + struct.pack("<HHH", 32768, 1, 1)
+            + struct.pack("<HHH", 16, 4, 0) * 2
+            + b"\x01\x00",
+            "y block description: block size 32768 is larger than 128",
+        ),
+        (
+            "a chroma edge above the ceiling",
             struct.pack("<II", 8, 8)
-            + struct.pack("<HHH", 65535, 0, 65535)
+            + struct.pack("<HHH", 8, 4, 0)
+            + struct.pack("<HHH", 256, 4, 0) * 2,
+            "cb block description: block size 256 is larger than 128",
+        ),
+        (
+            # Every channel empty, so no count ties the dimensions to anything.
+            "a 26-byte header declaring a picture no channel can hold",
+            struct.pack("<II", 4294967295, 1000000)
+            + struct.pack("<HHH", 8, 4, 0)
             + struct.pack("<HHH", 16, 4, 0) * 2,
-            "block size 65535 is not a positive power of two",
+            "y block description: a 4294967295x1000000 image in 8-pixel blocks needs "
+            "67108864000000 blocks, and a .cim channel holds at most 65535",
         ),
     ],
 )
@@ -159,6 +180,27 @@ def test_cim_declaring_no_blocks_is_valid(tmp_path: Path) -> None:
     image = CustomizableImage.load(str(path))
     assert image.get_dimensions() == (8, 8)
     assert image.get_y_data() == []
+
+
+def test_an_empty_channel_still_bounds_the_picture_it_declares(tmp_path: Path) -> None:
+    """A zero count means "this channel is empty" and is exempt from the
+    exact-count rule, which left the dimensions of an all-empty file
+    unbounded: 26 bytes declared 4000x4000 and the decoder filled 16 million
+    pixels with grey, or declared more and it ran out of memory (#55). The
+    picture may still be as large as a channel could hold, and no larger."""
+    widest = MAX_BLOCKS_PER_CHANNEL * MAX_BLOCK_SIZE
+    empty = struct.pack("<HHH", MAX_BLOCK_SIZE, 1, 0) * 3
+
+    fits = tmp_path / "fits.cim"
+    fits.write_bytes(struct.pack("<II", widest, 1) + empty)
+    assert CustomizableImage.load(str(fits)).get_dimensions() == (widest, 1)
+
+    beyond = tmp_path / "beyond.cim"
+    beyond.write_bytes(struct.pack("<II", widest + 1, 1) + empty)
+    with pytest.raises(
+        UnsupportedFileFormatError, match=f"needs {MAX_BLOCKS_PER_CHANNEL + 1} blocks"
+    ):
+        CustomizableImage.load(str(beyond))
 
 
 def test_truncation_names_the_first_incomplete_block(tmp_path: Path) -> None:
@@ -275,6 +317,8 @@ def test_every_shipped_encoder_configuration_still_loads(tmp_path: Path) -> None
         {"packed_block_size": 1},
         {"y_block_size": 16, "cb_block_size": 4, "cr_block_size": 4, "packed_block_size": 3},
         {"y_block_size": 32, "cb_block_size": 32, "packed_block_size": 4},
+        # The largest edge the codec takes, which the reader's ceiling must admit.
+        {"y_block_size": 128, "cb_block_size": 128, "cr_block_size": 128},
     ]
     for index, kwargs in enumerate(configurations):
         output = tmp_path / f"{index}.cim"

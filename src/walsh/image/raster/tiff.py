@@ -15,6 +15,7 @@ Writing always produces a little-endian single-strip file.
 from __future__ import annotations
 
 import logging
+import os
 import struct
 from typing import BinaryIO
 
@@ -132,61 +133,84 @@ class TIFFImage(RasterImage):
         return int(ifd_offset)
 
     def _read_values(
-        self, file: BinaryIO, field_type: int, count: int, raw: bytes
+        self, file: BinaryIO, tag: int, field_type: int, count: int, raw: bytes, file_size: int
     ) -> tuple[int, ...]:
         """Decode one IFD entry's value, following the offset when it has one.
 
         Values of four bytes or fewer live in the entry itself, left-justified;
         anything larger is stored elsewhere and the entry holds its offset.
+        An out-of-line value is checked against the file's length before it
+        is read: ``count`` is a 32-bit field, and ``file.read`` allocates what
+        it is asked for, so a 22-byte file used to ask for 4 GiB first and
+        report that the field ran past the end afterwards.
+
+        Only tags this profile reads come here, and every one of them is an
+        integer the specification stores as a SHORT or a LONG. Any other type
+        is refused rather than read as absent, which for Compression or
+        Orientation would mean assuming the default.
 
         Args:
             file: Stream to read from when the value is out of line.
+            tag: The entry's tag, used only in the error message.
             field_type: The TIFF type code.
             count: How many values the entry holds.
             raw: The entry's four-byte value/offset field.
+            file_size: The file's length in bytes.
 
         Returns:
             The decoded values.
 
         Raises:
-            UnsupportedFileFormatError: If the type is unknown or the values
-                lie beyond the end of the file.
+            UnsupportedFileFormatError: If the type is unknown or not an
+                unsigned integer, or the values lie beyond the end of the file.
         """
         if field_type not in TYPE_SIZES:
             raise UnsupportedFileFormatError(f"unknown TIFF field type {field_type}")
+        codes = {TYPE_BYTE: "B", TYPE_SHORT: "H", TYPE_LONG: "I"}
+        if field_type not in codes:
+            raise UnsupportedFileFormatError(
+                f"TIFF tag {tag} has field type {field_type}; only BYTE, SHORT and LONG are read"
+            )
 
         size = TYPE_SIZES[field_type] * count
         if size > 4:
             (offset,) = struct.unpack(f"{self._prefix}I", raw)
+            if offset + size > file_size:
+                raise UnsupportedFileFormatError(
+                    f"TIFF field at offset {offset} runs past the end of the file"
+                )
             here = file.tell()
             file.seek(offset)
             payload = file.read(size)
             file.seek(here)
-            if len(payload) < size:
-                raise UnsupportedFileFormatError(
-                    f"TIFF field at offset {offset} runs past the end of the file"
-                )
         else:
             payload = raw[:size]
-
-        codes = {TYPE_BYTE: "B", TYPE_SHORT: "H", TYPE_LONG: "I"}
-        if field_type not in codes:
-            # Types this profile never needs; keep them opaque rather than lying.
-            return ()
         return struct.unpack(f"{self._prefix}{count}{codes[field_type]}", payload)
 
-    def _read_ifd(self, file: BinaryIO, offset: int) -> dict[int, tuple[int, ...]]:
+    def _read_ifd(self, file: BinaryIO, offset: int, file_size: int) -> dict[int, tuple[int, ...]]:
         """Read one image file directory into a tag-to-values mapping.
+
+        Only the tags this profile reads are decoded. Every other entry is
+        walked past without looking at its value, which is what the TIFF
+        specification asks of a reader that does not know a field, and what
+        stops a directory of 65,535 junk entries, each pointing at the same
+        region of the file, from decoding that region 65,535 times. A tag
+        this profile reads may appear once: a directory naming two strip
+        tables, or two widths, describes no single image, and decoding each
+        copy would let the same repetition back in.
 
         Args:
             file: Stream to read from.
             offset: Byte offset of the directory.
+            file_size: The file's length in bytes.
 
         Returns:
-            Every entry in the directory, keyed by tag.
+            The entries for the tags this profile reads, keyed by tag.
 
         Raises:
-            UnsupportedFileFormatError: If the directory is truncated.
+            UnsupportedFileFormatError: If the directory is truncated, repeats
+                a tag this profile reads, or one of those tags has a value
+                that cannot be decoded; see :meth:`_read_values`.
         """
         file.seek(offset)
         raw = file.read(2)
@@ -202,7 +226,13 @@ class TIFFImage(RasterImage):
                     f"truncated TIFF directory entry {index} of {count}"
                 )
             tag, field_type, value_count = struct.unpack(f"{self._prefix}HHI", entry[:8])
-            entries[tag] = self._read_values(file, field_type, value_count, entry[8:12])
+            if tag not in _READ_TAGS:
+                continue
+            if tag in entries:
+                raise UnsupportedFileFormatError(f"TIFF directory holds tag {tag} more than once")
+            entries[tag] = self._read_values(
+                file, tag, field_type, value_count, entry[8:12], file_size
+            )
         return entries
 
     @staticmethod
@@ -276,27 +306,40 @@ class TIFFImage(RasterImage):
                 f"only top-left orientation is supported, got {orientation}"
             )
 
-    def _read_strips(self, file: BinaryIO, entries: dict[int, tuple[int, ...]]) -> bytes:
+    def _read_strips(
+        self, file: BinaryIO, entries: dict[int, tuple[int, ...]], file_size: int
+    ) -> bytes:
         """Concatenate the image's strips into one block of pixel bytes.
+
+        Never accumulates more than ``width * height * 3`` bytes: each read is
+        clamped to the bytes still outstanding. Nothing stops a file from
+        pointing several strip entries at one region, and reading them all
+        first would let a 180 KB file cost hundreds of megabytes for an 8x8
+        image. Clamping returns the same bytes for every file that was
+        readable before, because the strip arrays are in image order however
+        the strips are laid out on disk.
+
+        The clamp bounds the pixels by what the header *declares*, which the
+        file chooses, so they are also bounded by the file: an uncompressed
+        image cannot hold more pixel bytes than the file it is in, and one
+        that claims to can only be reading the same bytes more than once. A
+        1 MB file whose 512 strips all pointed at one region used to load as
+        a 16384x10922 picture, that megabyte repeated, for a gigabyte of
+        memory. It is refused before any strip is read.
 
         Args:
             file: Stream to read from.
             entries: The image's directory.
+            file_size: The file's length in bytes.
 
         Returns:
             ``width * height * 3`` bytes of interleaved RGB samples.
 
-        Never accumulates more than that: each read is clamped to the bytes
-        still outstanding. Nothing stops a file from pointing several strip
-        entries at one region, and reading them all first would let a 180 KB
-        file cost hundreds of megabytes for an 8x8 image. Clamping returns the
-        same bytes for every file that was readable before, because the strip
-        arrays are in image order however the strips are laid out on disk.
-
         Raises:
             UnsupportedFileFormatError: If the strip tags disagree with each
-                other, a strip runs past the end of the file, or a strip lies
-                entirely beyond the pixels the image declares.
+                other, the image declares more pixel bytes than the whole
+                file holds, a strip runs past the end of the file, or a strip
+                lies entirely beyond the pixels the image declares.
         """
         offsets = entries.get(TAG_STRIP_OFFSETS, ())
         counts = entries.get(TAG_STRIP_BYTE_COUNTS, ())
@@ -308,6 +351,12 @@ class TIFFImage(RasterImage):
             )
 
         expected = self._width * self._height * SAMPLES_PER_PIXEL
+        if expected > file_size:
+            raise UnsupportedFileFormatError(
+                f"TIFF declares a {self._width}x{self._height} image, {expected} bytes of "
+                f"pixels, but the whole file is {file_size} bytes: it is truncated, or its "
+                f"strips read the same bytes more than once"
+            )
 
         data = bytearray()
         for index, (offset, length) in enumerate(zip(offsets, counts, strict=True)):
@@ -350,13 +399,17 @@ class TIFFImage(RasterImage):
             OSError: If the file cannot be read.
         """
         with open_binary_read(filename) as file:
+            # Every size this reader takes from the file is checked against
+            # this before anything is allocated for it.
+            file_size = file.seek(0, os.SEEK_END)
+            file.seek(0)
             ifd_offset = self._read_header(file)
-            entries = self._read_ifd(file, ifd_offset)
+            entries = self._read_ifd(file, ifd_offset, file_size)
 
             self._width = self._single(entries, TAG_IMAGE_WIDTH)
             self._height = self._single(entries, TAG_IMAGE_LENGTH)
             self._validate(entries)
-            data = self._read_strips(file, entries)
+            data = self._read_strips(file, entries, file_size)
 
         self.set_array(np.frombuffer(data, dtype=np.uint8).reshape(self._height, self._width, 3))
         log.debug("loaded TIFF %dx%d from %s", self._width, self._height, filename)
@@ -408,6 +461,24 @@ class TIFFImage(RasterImage):
         with open_binary_write(filename) as file:
             file.write(bytes(out))
 
+
+#: Tags :meth:`TIFFImage.load` decodes. Every other entry in a directory is
+#: walked past unread. ``RowsPerStrip`` is not among them: the strip tables
+#: already say where every row is.
+_READ_TAGS = frozenset(
+    {
+        TAG_IMAGE_WIDTH,
+        TAG_IMAGE_LENGTH,
+        TAG_BITS_PER_SAMPLE,
+        TAG_COMPRESSION,
+        TAG_PHOTOMETRIC,
+        TAG_STRIP_OFFSETS,
+        TAG_ORIENTATION,
+        TAG_SAMPLES_PER_PIXEL,
+        TAG_STRIP_BYTE_COUNTS,
+        TAG_PLANAR_CONFIG,
+    }
+)
 
 #: Tags written by :meth:`TIFFImage.save`, in the ascending order the spec wants.
 _ENTRY_TAGS = (

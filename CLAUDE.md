@@ -317,9 +317,11 @@ NumPy versions, which a pickled array is not. `data/pkl/earth.pkl` is a pickled
 array written under NumPy 2 and is in the golden test and the CI `cmp` loop.
 
 `netpbm/_samples.py` holds what PPM and PAM share, since their rasters are identical
-behind different headers: the one-byte sample decoder (one read, a lookup-table
-rescale when `maxval` is below 255, tuples built by `zip` in C; samples above
-`maxval` are rejected by name) and the encoder (`bytes` over a chained
+behind different headers: the one-byte sample decoder (one read, chunked
+through `read_up_to` since 0.5.4 because nothing bounds a Netpbm width or
+height, #56; a lookup-table rescale when `maxval` is below 255, tuples built
+by `zip` in C; samples above `maxval` are rejected by name) and the
+encoder (`bytes` over a chained
 iterator). `pam.py` supports exactly one profile — `DEPTH 3`, `TUPLTYPE RGB`
 or none, `MAXVAL` ≤ 255 — and rejects the rest by name, like `tiff.py`. Its
 writer emits the header in `pamtopam`'s order, so the two are byte-identical;
@@ -386,7 +388,17 @@ reader clamps every read to the bytes still outstanding (0.4.5, #23): repeated
 strip offsets otherwise let a small file cost hundreds of megabytes. Do not
 "tidy" that into an up-front `sum(counts) > expected` rejection — `RowsPerStrip`
 need not divide the height, so a padded final strip legitimately overshoots and
-real files rely on the surplus being ignored. It reads
+real files rely on the surplus being ignored. **What the clamp does not
+bound, the file's length does** (0.5.4, #57): `load` measures the file once,
+and `_read_strips` refuses an image declaring more pixel bytes than the whole
+file holds, since an uncompressed image that claims more can only be reading
+one region twice (a 1 MB file loaded as a 179 MP picture). Every out-of-line
+IFD value is checked against the length before it is read. Only `_READ_TAGS`
+are decoded; any other entry is walked past, value unread, as the spec asks
+of an unknown field, which is what keeps a directory of 65,535 entries over
+one region linear. A tag in `_READ_TAGS` may appear once and must be BYTE,
+SHORT or LONG: reading another type as absent would apply its default, so
+do not bring back the "keep it opaque" return. It reads
 both byte orders (the header declares its own) and multi-strip files; it always
 writes little-endian single-strip. Widening the profile means handling
 `Compression`, `PlanarConfiguration` or `BitsPerSample` in `_validate` and the
@@ -405,11 +417,17 @@ dimensions: a zero count is the meaningful "empty channel, fill with a neutral"
 state that `extract` relies on. **The reader validates the header before
 allocating from it** (0.4.7, #22): `_validate_header` runs once all three
 descriptions are read (so a short header is still "truncated", not
-"inconsistent") and requires positive dimensions, a power-of-two block size, a
-packed size in `1..block`, and a block count of `0` or exactly
+"inconsistent") and requires positive dimensions, a power-of-two block size
+no larger than `MAX_BLOCK_SIZE`, a packed size in `1..block`, dimensions that
+cut every channel into at most `MAX_BLOCKS_PER_CHANNEL` blocks *whatever its
+count*, and a block count of `0` or exactly
 `blocks_for(width, height, block)`. That count rule is exact — the encoder pads
 to a block multiple — and `blocks_for` is the one implementation both `Codec`
-and the reader use. `.cim` has no signature, so this is also how a file that
+and the reader use. The two ceilings (0.5.4, #55) are the encoder's own
+limits, and they are what bound a header's allocation to a picture the format
+can describe: without them 131 KB asked for 512 TiB, and 26 bytes with every
+channel empty could declare any size, since an empty channel is exempt from
+the count rule. `.cim` has no signature, so this is also how a file that
 is not a `.cim` at all is caught. Coefficients are read in bounded chunks
 (`_read_up_to`) because `file.read(n)` allocates `n` bytes first. A channel
 is decoded with one `np.frombuffer` and written with one `tobytes`; a
@@ -703,6 +721,8 @@ fixed the saving of a loaded `.cim`. v0.5.2 let that direct route write any
 format from any other (#51). v0.5.3 shipped the first outside contribution (#72, closing #70):
 NaN refused as a coefficient threshold, a BMP pixel offset inside the header
 refused, and a failed staging naming the destination; the README gained a
-List of contributors.
+List of contributors. v0.5.4 bounded what a header can make the `.cim`,
+Netpbm and TIFF readers allocate or read by what the file holds (#55, #56,
+#57); the TIFF reader now decodes only the tags its profile reads.
 Partially based on
 https://github.com/ktisha/python2012/tree/dee4beda8e22f3a66a3e31384d4b72ab66102e88/avereshchagin
