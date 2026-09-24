@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import tracemalloc
 from pathlib import Path
 
 import pytest
@@ -83,6 +84,10 @@ def test_low_maxval_is_rescaled_to_full_range(tmp_path: Path) -> None:
         (b"P6\n0 1\n255\n", "width"),
         (b"P6\n1 x\n255\n", "not a number"),
         (b"P6\n1 1\n255\n\x00", "truncated PPM data"),
+        (
+            b"P6\n2000000000 2000000000\n255\n\x01\x02\x03",
+            "truncated PPM data: expected 12000000000000000000 bytes, got 3",
+        ),
         (b"P6\n2 2\n", "truncated PPM header"),
         (b"P3\n2 2\n255\n1 2 3", "truncated PPM data"),
         (b"P3\n1 1\n255\n1 2 zz", "not a number"),
@@ -93,6 +98,24 @@ def test_malformed_ppm_is_rejected(tmp_path: Path, content: bytes, match: str) -
     path.write_bytes(content)
     with pytest.raises(UnsupportedFileFormatError, match=match):
         PPMImage().load(str(path))
+
+
+def test_a_header_cannot_make_the_reader_allocate_what_the_file_lacks(tmp_path: Path) -> None:
+    """Nothing bounds the width and height, and file.read(n) allocates n
+    bytes before reading any: this 20-byte file asked for 48 MiB, and one
+    declaring 100000x10000 for 3 GB, before three bytes were found (#56)."""
+    path = tmp_path / "liar.ppm"
+    path.write_bytes(b"P6\n4096 4096\n255\n\x01\x02\x03")
+    assert path.stat().st_size == 20
+
+    tracemalloc.start()
+    try:
+        with pytest.raises(UnsupportedFileFormatError, match="expected 50331648 bytes, got 3"):
+            PPMImage().load(str(path))
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert peak < 4_000_000
 
 
 @pytest.mark.parametrize("content", [b"P6\n1 1\n15\n\x01\x02\x16", b"P3\n1 1\n15\n1 2 22"])

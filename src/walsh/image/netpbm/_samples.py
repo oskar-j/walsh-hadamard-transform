@@ -13,6 +13,7 @@ from typing import BinaryIO
 import numpy as np
 
 from walsh.exceptions import UnsupportedFileFormatError
+from walsh.image._io import read_up_to
 from walsh.image.base import CHANNELS, PixelArray
 
 __all__ = ["NETPBM_MAX_SAMPLE", "encode_samples", "read_samples", "rescale_sample"]
@@ -49,6 +50,12 @@ def read_samples(file: BinaryIO, pixels: int, maxval: int, what: str) -> PixelAr
     The whole raster is decoded in two array operations: one read, and one
     lookup-table pass when ``maxval`` is below 255. Nothing per pixel.
 
+    The read goes through :func:`~walsh.image._io.read_up_to`, because
+    ``pixels`` is the header's width times its height, which nothing bounds:
+    a 32-byte PPM declaring 2000000000x2000000000 made ``file.read`` raise
+    ``OverflowError``, a traceback rather than an ``Error:`` line, and one
+    declaring 100000x10000 asked for 3 GB before finding three bytes.
+
     Args:
         file: Stream positioned at the first sample.
         pixels: How many pixels the header promised. At least one.
@@ -63,7 +70,7 @@ def read_samples(file: BinaryIO, pixels: int, maxval: int, what: str) -> PixelAr
             sample exceeds ``maxval``.
     """
     expected = pixels * CHANNELS
-    data = file.read(expected)
+    data = read_up_to(file, expected)
     if len(data) < expected:
         raise UnsupportedFileFormatError(
             f"truncated {what} data: expected {expected} bytes, got {len(data)}"

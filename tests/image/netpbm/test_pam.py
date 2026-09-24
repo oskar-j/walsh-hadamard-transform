@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import tracemalloc
 from pathlib import Path
 from typing import Any
 
@@ -162,6 +163,10 @@ def test_other_profiles_are_rejected_by_name(
             "truncated PAM data",
         ),
         (
+            b"P7\nWIDTH 2000000000\nHEIGHT 2000000000\nDEPTH 3\nMAXVAL 255\nENDHDR\n\x01\x02\x03",
+            "truncated PAM data: expected 12000000000000000000 bytes, got 3",
+        ),
+        (
             b"P7\nWIDTH 1\nHEIGHT 1\nDEPTH 3\nMAXVAL 15\nENDHDR\n\x01\x02\x16",
             "22 exceeds maxval 15",
         ),
@@ -172,6 +177,20 @@ def test_malformed_pam_is_rejected(tmp_path: Path, content: bytes, match: str) -
     path.write_bytes(content)
     with pytest.raises(UnsupportedFileFormatError, match=match):
         PAMImage().load(str(path))
+
+
+def test_a_header_cannot_make_the_reader_allocate_what_the_file_lacks(tmp_path: Path) -> None:
+    """The PPM reader's bound, through the raster reader the two share (#56)."""
+    path = write_pam(tmp_path / "liar.pam", 4096, 4096, [(1, 2, 3)])
+
+    tracemalloc.start()
+    try:
+        with pytest.raises(UnsupportedFileFormatError, match="expected 50331648 bytes, got 3"):
+            PAMImage().load(str(path))
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert peak < 4_000_000
 
 
 @pytest.mark.parametrize("name", ["x.pam", "x.PAM"])
