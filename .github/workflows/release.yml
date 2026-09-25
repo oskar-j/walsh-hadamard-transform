@@ -47,7 +47,7 @@ jobs:
     steps:
       # gh reads the token from GH_TOKEN and nothing here pushes, so the token
       # is not left in .git/config for the build and the test suite to read.
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -55,7 +55,7 @@ jobs:
       # No cache: this job builds what is uploaded to PyPI, so it resolves from
       # the index rather than restoring what an earlier run saved.
       - name: Install uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           enable-cache: false
 
