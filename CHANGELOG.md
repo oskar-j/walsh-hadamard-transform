@@ -9,6 +9,59 @@ The `## [x.y.z]` headings are load-bearing: the release workflow extracts the
 section matching the version in `pyproject.toml` and uses it as the GitHub
 Release notes.
 
+## [0.5.5]
+
+Nothing in the package changes. This release hardens how it is built and
+published, and says where to report a vulnerability. Closes #68.
+
+### Security
+
+- **Every action is pinned to a commit SHA.** The PyPI upload, the one step
+  that runs as the identity allowed to publish `walsh`, used
+  `pypa/gh-action-pypi-publish@release/v1`, which is a branch, and checkout,
+  upload-artifact and download-artifact floated on major tags. Each is now the
+  full commit its ref pointed at, so CI runs the same code as before, with the
+  release in a comment: checkout v5.1.0, setup-uv v9.0.0, upload-artifact
+  v7.0.1, download-artifact v8.0.1 and gh-action-pypi-publish v1.14.2. The
+  PyPI action runs a container image tagged with its ref, and the image for
+  that commit exists on ghcr.io.
+- **The CI token is read-only.** `ci.yml` declared no permissions, and the
+  repository default was write, so every CI job on `master` could write
+  contents, packages, pull requests and more while it ran build backends,
+  twine, the test suite and a fresh resolve of numpy and click. It asks for
+  `contents: read` now. `release.yml` grants nothing at workflow level, and
+  each job asks for what it uses: `contents: write` for the release,
+  `id-token: write` for the upload. The upload job never held more than that:
+  a job-level `permissions` block replaces the workflow's rather than adding to
+  it, as the 0.5.4 run's log shows.
+- **No checkout leaves the token in `.git/config`.** Every checkout sets
+  `persist-credentials: false`, the release job's included: `gh` reads the
+  token from `GH_TOKEN`, and nothing pushes.
+- **The release job starts without a cache.** It builds what goes to PyPI,
+  and it used to restore the uv cache earlier runs had saved. It now resolves
+  from the index.
+- **Dependabot keeps the pins current.** `.github/dependabot.yml` proposes new
+  action pins and `uv.lock` updates once a month, one grouped pull request per
+  ecosystem, for releases at least a week old. For uv it touches the lock
+  only, so `pyproject.toml` and its requirements mirrors never change under
+  it.
+
+### Added
+
+- **`SECURITY.md`**: how to report a vulnerability privately, through
+  GitHub's private reporting or by email, what a report needs, what happens
+  next, and which versions get fixes (the latest release only). It sets out
+  what is in scope: the pickle allowlist, resource use driven by a header,
+  crashes of the interpreter, and writes outside the output. It ships in the
+  sdist, and the README and `CONTRIBUTING.md` point to it.
+
+### Checked
+
+- `zizmor` 1.30.1, before and after: 13 high, 8 medium and 7 informational
+  findings became 0, 0 and 7. The seven are template expansions of the
+  version string in `release.yml`, which `uv version` has already validated as
+  PEP 440. `actionlint` and the workflow and Dependabot JSON schemas pass.
+
 ## [0.5.4]
 
 A small file can no longer make a reader allocate, or read, much more than

@@ -6,18 +6,29 @@ on:
   pull_request:
   workflow_dispatch:
 
-# setup-uv is pinned to an exact version rather than a floating major like the
-# other actions: it publishes major tags only up to v7, so `@v9` does not
-# resolve. Bump this deliberately when a new release lands.
+# Read-only. Nothing here writes to the repository, and these jobs run a lot of
+# code from elsewhere: build backends under `uv sync`, twine, the test suite,
+# and a fresh resolve of numpy and click for the wheel smoke. upload-artifact
+# authenticates with the runner's own token, not this one.
+permissions:
+  contents: read
+
+# Every action is pinned to a full commit SHA, with the release it came from in
+# the comment: a tag can be moved to other code, a commit cannot. Dependabot
+# proposes new pins as pull requests (.github/dependabot.yml). Every checkout
+# sets persist-credentials: false, so the token is not left in .git/config for
+# that code to read; no job here pushes.
 
 jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v9.0.0
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           python-version: "3.12"
 
@@ -46,10 +57,12 @@ jobs:
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v9.0.0
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -69,7 +82,7 @@ jobs:
 
       - name: Upload the coverage report
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-${{ matrix.python-version }}
           path: coverage.xml
@@ -80,10 +93,12 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v9.0.0
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
 
       - name: Build distributions
         run: uv build
