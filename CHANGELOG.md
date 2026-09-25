@@ -9,6 +9,45 @@ The `## [x.y.z]` headings are load-bearing: the release workflow extracts the
 section matching the version in `pyproject.toml` and uses it as the GitHub
 Release notes.
 
+## [0.5.6]
+
+Nothing in the package changes: this protects the codec's reference outputs
+from the repository's own instructions. Closes #67.
+
+### Fixed
+
+- **The README quick start and `examples/roundtrip.py` no longer write over
+  `data/bmp/recreated.bmp`.** That file is one of the references
+  `test_golden.py` compares the codec against, byte for byte, and both of
+  them extracted into it. Run after a change to the codec, they regenerated
+  the reference from the changed code, and the golden comparisons for BMP
+  then passed against the codec's own output: with one line of the colour
+  conversion changed, 44 of the 51 golden tests failed before the quick start
+  and 42 after it. A `git commit -a` would also have carried the regenerated
+  reference in with the change, unannounced, where a deliberate change to
+  the codec regenerates every reference in one commit and says so here. The
+  quick start now writes `out.cim` and `restored.bmp`, and the example works
+  in a temporary directory, removed when its window closes.
+
+### Added
+
+- **CI fails if the test suite leaves the checkout changed.** After the tests,
+  the `test` job requires `git status --porcelain` to be empty, so a test that
+  writes into `data/`, or anywhere else in the repository, is caught on the
+  pull request that adds it. Ignored files such as `.venv` and
+  `coverage.xml` do not count.
+- A test runs `examples/roundtrip.py` and checks that nothing in `data/` is
+  written to at all, including an old file rewritten with the same bytes. It
+  needs the `demo` extra, so it runs locally and skips in CI, as the
+  Pillow-based tests do.
+- `CONTRIBUTING.md` lists "nothing writes into `data/`" among the invariants
+  that are easy to break.
+
+### Changed
+
+- `.gitignore` drops its line for `data/cim/transformed.cim`, the old quick
+  start's output. The `*.cim` rule below it still covers the file.
+
 ## [0.5.5]
 
 Nothing in the package changes. This release hardens how it is built and

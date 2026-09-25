@@ -80,6 +80,22 @@ jobs:
       - name: Run tests with coverage
         run: uv run pytest -v --cov --cov-report=term-missing --cov-report=xml
 
+      # The suite must leave the checkout as it found it. data/ holds the
+      # references test_golden.py compares against, and anything that writes
+      # there from the code under test turns the comparison into one between
+      # the codec and its own output (#67). Ignored files (.venv, coverage.xml)
+      # do not count, except in data/: *.cim is ignored everywhere, and a
+      # fresh checkout has nothing ignored there, so any file that is counts.
+      - name: Check the tests left the checkout unchanged
+        run: |
+          changes=$(git status --porcelain)
+          stray=$(git status --porcelain --ignored -- data/ | grep '^!!' || true)
+          if [ -n "$changes$stray" ]; then
+            echo "The test suite changed the checkout:" >&2
+            printf '%s\n' "$changes" "$stray" | sed '/^$/d' >&2
+            exit 1
+          fi
+
       - name: Upload the coverage report
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

@@ -145,8 +145,8 @@ pip install -e ".[demo]" -r requirements-dev.txt
 ### Command line
 
 ```
-walsh compress data/bmp/image.bmp data/cim/transformed.cim
-walsh extract  data/cim/transformed.cim data/bmp/recreated.bmp
+walsh compress data/bmp/image.bmp out.cim
+walsh extract  out.cim restored.bmp
 ```
 
 The format is taken from the filename suffix, so PPM works the same way, and a
