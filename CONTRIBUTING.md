@@ -11,6 +11,11 @@ This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md), version
 unacceptable behaviour to the co-ordinator's address above, which is also the
 enforcement contact in that document.
 
+## Reporting a vulnerability
+
+Privately, not in an issue or a pull request: [SECURITY.md](SECURITY.md) gives
+the route, what a report needs, and what counts.
+
 ## Adding features or fixing bugs
 
 * Fork the repo

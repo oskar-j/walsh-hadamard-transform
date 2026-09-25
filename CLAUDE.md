@@ -628,6 +628,26 @@ table of contents equal to its headings: after renaming or adding a heading,
 run `python tests/project/test_readme_toc.py` from the repository root to
 regenerate the block between the `<!-- toc -->` markers.
 
+**The workflows are least-privilege and pinned** (0.5.5, #68). `ci.yml` runs
+on `contents: read`. `release.yml` grants nothing at workflow level and each
+job what it uses, `contents: write` for `release` and `id-token: write` for
+`publish-pypi`: a job-level block replaces the workflow's rather than adding
+to it. Every action is pinned to a full commit SHA with its release in a
+trailing `# vX.Y.Z` comment, the form Dependabot rewrites, so never add a
+floating `@v5` or a branch ref. Every checkout sets `persist-credentials:
+false`, since nothing pushes and `gh` reads `GH_TOKEN`, and the release job
+runs setup-uv with `enable-cache: false` because it builds what PyPI gets.
+`.github/dependabot.yml` groups action pins and `uv.lock` bumps into one pull
+request a month each, with a seven-day cooldown, and `lockfile-only` for uv
+so `pyproject.toml` and the requirements mirrors never move under it. Do not
+give the `ci.yml` jobs a `name:`: their ids are the required checks on
+`master`. `uv tool run zizmor .github/` and `actionlint` are the checks when
+touching a workflow; the seven informational template-expansion findings left
+in `release.yml` are the version string, which `uv version` refuses unless it
+is PEP 440. `SECURITY.md` is the private reporting route and states the
+scope: the pickle allowlist, resource use driven by a header, interpreter
+crashes, and writes outside the output.
+
 ## Coverage gate
 
 `[tool.coverage.report] fail_under = 90` with branch coverage on. At 100%
@@ -723,6 +743,8 @@ NaN refused as a coefficient threshold, a BMP pixel offset inside the header
 refused, and a failed staging naming the destination; the README gained a
 List of contributors. v0.5.4 bounded what a header can make the `.cim`,
 Netpbm and TIFF readers allocate or read by what the file holds (#55, #56,
-#57); the TIFF reader now decodes only the tags its profile reads.
+#57); the TIFF reader now decodes only the tags its profile reads. v0.5.5
+pinned every action by SHA, made the workflows least-privilege, added
+Dependabot and a `SECURITY.md` (#68).
 Partially based on
 https://github.com/ktisha/python2012/tree/dee4beda8e22f3a66a3e31384d4b72ab66102e88/avereshchagin
