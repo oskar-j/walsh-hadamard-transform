@@ -591,8 +591,17 @@ between Accelerate and openblas and relaxed the checks to a tolerance; that
 machinery is gone and the CI wheel smoke compares with `cmp` on the Linux
 runner, which is the standing cross-platform proof. A deliberate change to
 the codec regenerates every `recreated.*` file and `transformed_earth.cim`
-in the same commit and states the change in the CHANGELOG. `recreated.png`
-is the one output pinned by its pixels rather than its bytes (see `png.py`).
+in the same commit and states the change in the CHANGELOG. **Nothing else
+writes into `data/`** (0.5.6, #67): the README quick start and
+`examples/roundtrip.py` used to extract to `data/bmp/recreated.bmp`, so
+running either after a change to the codec regenerated that reference from
+the changed code and the BMP golden comparisons passed against the codec's
+own output. Documented commands write scratch names (`out.cim`,
+`restored.bmp`), the example works in a `TemporaryDirectory` and
+`test_roundtrip_example.py` checks that `data/` is not written to at all,
+and CI's `test` job fails if the suite leaves `git status --porcelain`
+non-empty. `recreated.png` is the one output pinned by its pixels rather
+than its bytes (see `png.py`).
 `data/cim/transformed_earth.cim` is un-ignored in `.gitignore` explicitly — it
 was silently absent from CI until 0.4.11.
 
@@ -745,6 +754,7 @@ List of contributors. v0.5.4 bounded what a header can make the `.cim`,
 Netpbm and TIFF readers allocate or read by what the file holds (#55, #56,
 #57); the TIFF reader now decodes only the tags its profile reads. v0.5.5
 pinned every action by SHA, made the workflows least-privilege, added
-Dependabot and a `SECURITY.md` (#68).
+Dependabot and a `SECURITY.md` (#68). v0.5.6 stopped the README quick
+start and `examples/roundtrip.py` writing over `data/bmp/recreated.bmp` (#67).
 Partially based on
 https://github.com/ktisha/python2012/tree/dee4beda8e22f3a66a3e31384d4b72ab66102e88/avereshchagin

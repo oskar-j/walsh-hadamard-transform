@@ -104,7 +104,6 @@ venv.bak/
 .mypy_cache/
 
 # Project artefacts
-data/cim/transformed.cim
 *.cim
 # The reference output the golden test and the wheel smoke compare against.
 # It was ignored by the rule above until 0.4.11, so CI never actually had it.

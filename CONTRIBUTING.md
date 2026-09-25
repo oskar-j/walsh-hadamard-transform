@@ -92,7 +92,7 @@ checked-in 400x400 sample) for each format.
 
 ## Things that will trip you up
 
-Three invariants are load-bearing and easy to break by accident:
+Four invariants are load-bearing and easy to break by accident:
 
 * **Raster images are RGB, top row first, in memory** — whatever the file
   itself stores. BMP is the awkward one, storing blue-green-red samples in
@@ -106,6 +106,14 @@ Three invariants are load-bearing and easy to break by accident:
 * **Coefficient removal thresholds spectral coefficients, not matrix entries.**
   Every entry of an orthonormal Hadamard matrix has the same magnitude, so a
   threshold applied to the matrix can only ever be all-or-nothing.
+* **Nothing writes into `data/`.** Its `recreated.*` files and
+  `transformed_earth.cim` are the codec's contract, which `test_golden.py` and
+  CI's wheel smoke compare against byte for byte. Send your own outputs
+  elsewhere: a reference regenerated from a changed codec makes the test
+  compare the codec with its own output, and a `git commit -a` then ships the
+  change unannounced. A deliberate change to the codec regenerates them all in
+  one commit and says so in the CHANGELOG. CI fails if the test suite leaves
+  the checkout changed.
 
 `CLAUDE.md` documents the architecture and the remaining deliberate quirks in
 more detail.
