@@ -84,13 +84,15 @@ jobs:
       # references test_golden.py compares against, and anything that writes
       # there from the code under test turns the comparison into one between
       # the codec and its own output (#67). Ignored files (.venv, coverage.xml)
-      # do not count; anything else, tracked or new, does.
+      # do not count, except in data/: *.cim is ignored everywhere, and a
+      # fresh checkout has nothing ignored there, so any file that is counts.
       - name: Check the tests left the checkout unchanged
         run: |
           changes=$(git status --porcelain)
-          if [ -n "$changes" ]; then
+          stray=$(git status --porcelain --ignored -- data/ | grep '^!!' || true)
+          if [ -n "$changes$stray" ]; then
             echo "The test suite changed the checkout:" >&2
-            echo "$changes" >&2
+            printf '%s\n' "$changes" "$stray" | sed '/^$/d' >&2
             exit 1
           fi
 
