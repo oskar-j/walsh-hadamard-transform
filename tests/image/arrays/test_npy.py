@@ -247,7 +247,7 @@ def test_malformed_npy_is_rejected(tmp_path: Path, name: str, content: bytes, ma
 
 @pytest.mark.parametrize(
     ("offset", "value", "error"),
-    [(62, 0x04, "TokenError"), (21, ord(","), "SyntaxError")],
+    [(8, 0x04, "TokenError"), (21, ord(","), "SyntaxError")],
     ids=["a byte that is not text", "a comma for a colon"],
 )
 def test_a_damaged_header_is_refused_whatever_numpy_raises(
@@ -255,7 +255,10 @@ def test_a_damaged_header_is_refused_whatever_numpy_raises(
 ) -> None:
     """NumPy documents ValueError for a bad header, but parses it with
     tokenize and ast, whose own errors are not ValueErrors: one changed byte
-    in the header was a traceback on the command line (#58)."""
+    in the header was a traceback on the command line (#58). Which byte
+    raises which of those varies by NumPy version, so these two are ones that
+    raise the same across 2.2, 2.4 and 2.5; other bytes reach the documented
+    ValueError, which was already caught."""
     good = write_npy(tmp_path / "good.npy", 4, 4, gradient_pixels(4, 4)).read_bytes()
     damaged = bytearray(good)
     damaged[offset] = value
