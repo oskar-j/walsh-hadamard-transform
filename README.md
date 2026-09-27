@@ -636,7 +636,11 @@ What a `.pkl` or `.pickle` may hold:
 Lists and tuples are interchangeable at every level. Samples must be integers
 in 0-255, Python's or NumPy's; floats, booleans, out-of-range values and ragged
 rows are refused by name. A declared size is never silently dropped: input that
-carries its own size, in any format, must match it.
+carries its own size, in any format, must match it. A list of pixels may
+describe at most 1032 samples for each byte of the file, so a small flat-colour
+canvas loads but a picture too large for its pickle to hold — a pickle repeats
+a shared row without restoring it — is refused; pickle a large picture as a
+NumPy array, or as rows that are separate lists.
 
 ```python
 from walsh import Codec

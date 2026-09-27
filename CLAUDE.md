@@ -272,10 +272,16 @@ non-opaque fourth channel is either transparency (flattening invents a
 background) or CMYK (a colour-space conversion, undefined without a profile,
 and indistinguishable from RGBA by shape). Everything else is rejected by
 name. The header is parsed with `np.lib.format.read_magic` /
-`read_array_header_1_0` and validated **before** the body is read. `np.load`
+`read_array_header_1_0` and validated **before** the body is read. That
+parser is documented to raise `ValueError`, but runs the header text through
+`tokenize` and `ast`, so a corrupt byte can surface as `TokenError` or
+`SyntaxError` instead; `_read_header` catches `Exception` and re-raises by
+name (0.5.7, #58), re-raising only `MemoryError`, since the header is bounded
+by NumPy's own `max_header_size`. `np.load`
 is never called with pickling enabled; an `object` array, whose body is a
 pickle, goes through `pkl.safe_loads` since 0.4.15 and is then judged as a
-pickle of pixels would be. The array rules themselves live in `arrays/_rules.py`
+pickle of pixels would be, under the same per-byte size bound (`safe_loads`
+and `pixels_from_object` both take the pickle's length). The array rules themselves live in `arrays/_rules.py`
 (`validate_image_array`, `to_rgb`), shared with the pickle reader, and take a
 label so each format's messages name it. Versions 1.0 and 2.0 are accepted; 3.0 exists only for
 structured dtypes and is rejected by name. The writer is `np.save` of a
@@ -299,7 +305,33 @@ anything; `_reconstruct` is wrapped to accept only that token with shape
 `(0,)`, which is all NumPy writes; and the real functions are taken from what
 NumPy itself emits (`np.zeros(1).__reduce__()[0]`), so no private module path
 is imported. Widening the allowlist is a security decision: an entry must be
-unable to import, open, or allocate from its arguments. `MemoryError` is
+unable to import, open, or allocate from its arguments. **An allowlist is not
+the whole boundary** (0.5.7, #54): the machine's `BUILD` opcode hands a state
+to whatever object it lands on, through no `find_class` lookup, and its
+length and index opcodes allocate before reading what they describe. So three
+more things hold. Every allowlisted name is armoured against a `BUILD`: each
+function is a `_Sealed` wrapper with no attribute to set (an 80-byte pickle
+had rewritten NumPy's `_frombuffer.__defaults__` for the process), `dtype`
+returns the interned built-in instance NumPy shares, whose `__setstate__`
+ignores its argument (a 164-byte file drove a fresh dtype's `__setstate__`
+into a segfault; a non-native, text, datetime or structured type is refused),
+and the array is a private `_PickledArray` whose `__setstate__` checks the
+shape, dtype and element count before NumPy's runs (a short object array
+segfaulted too). Do not hand out a bare NumPy function, the `dtype` class with
+`copy=True`, or a plain `ndarray` here; a `BUILD` reaches all three. Second,
+`_check_opcodes` walks the stream once before it runs: every declared length
+must fit in the bytes that follow it and every memo index must lie within the
+file, since `BINBYTES8` reserves its length up front (12 bytes asked for 256
+TiB, a `MemoryError`) and `LONG_BINPUT`/`PUT` grow the memo to their index (9
+bytes wrote 256 MiB). It is a regex run of the opcodes that need no check
+(millions of them in a pixel pickle; a Python loop doubled the load time),
+falling to one opcode at a time for the rest; a truncated tail is left to the
+unpickler, which stops at the same byte. Third, a list of pixels may describe
+at most 1032 samples per byte of the pickle (`_check_shape`, DEFLATE's largest
+expansion), because a pickle repeats a shared row or pixel without restoring
+it: `[[(1,2,3)]*k]*k` is `4k` bytes and `k²` pixels, quadratic to walk (cubic
+with a shared pixel), and the bound is applied to the lengths the lists
+declare, before anything walks them. `MemoryError` is
 re-raised, not converted, for the reason given under `EXPECTED_ERRORS`. A
 flat list has no dimensions and nothing guesses them (160,000 pixels are
 400x400 or 200x800): the size comes from the dict or from
@@ -322,7 +354,11 @@ through `read_up_to` since 0.5.4 because nothing bounds a Netpbm width or
 height, #56; a lookup-table rescale when `maxval` is below 255, tuples built
 by `zip` in C; samples above `maxval` are rejected by name) and the
 encoder (`bytes` over a chained
-iterator). `pam.py` supports exactly one profile — `DEPTH 3`, `TUPLTYPE RGB`
+iterator). `rescale_sample`, the P3 text path's per-sample check, rejects a
+negative value as well as one above `maxval` (0.5.7, #58): `-4` otherwise
+reached NumPy's `uint8` conversion, an `OverflowError` traceback, or a silent
+wrap to 252 on NumPy 1.24. P6 and PAM come from `uint8` bytes and cannot go
+negative, so it is the one caller. `pam.py` supports exactly one profile — `DEPTH 3`, `TUPLTYPE RGB`
 or none, `MAXVAL` ≤ 255 — and rejects the rest by name, like `tiff.py`. Its
 writer emits the header in `pamtopam`'s order, so the two are byte-identical;
 the Netpbm tools (`pamvalidate`, `pamtopnm`) are the independent check when
@@ -756,5 +792,10 @@ Netpbm and TIFF readers allocate or read by what the file holds (#55, #56,
 pinned every action by SHA, made the workflows least-privilege, added
 Dependabot and a `SECURITY.md` (#68). v0.5.6 stopped the README quick
 start and `examples/roundtrip.py` writing over `data/bmp/recreated.bmp` (#67).
-Partially based on
+v0.5.7 closed the last ways malformed input crashed the pickle reader or
+escaped as a traceback (#54, #58): a `.pkl` that segfaulted NumPy through a
+dtype or a short object array, an opcode that allocated more than the file
+held, a pickle of pixels that expanded quadratically, a corrupt `.npy`
+header, an out-of-range sample, a negative P3 PPM sample, and a `repr()` in a
+message that the file controlled. Partially based on
 https://github.com/ktisha/python2012/tree/dee4beda8e22f3a66a3e31384d4b72ab66102e88/avereshchagin

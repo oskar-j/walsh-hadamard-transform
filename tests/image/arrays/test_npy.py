@@ -246,6 +246,41 @@ def test_malformed_npy_is_rejected(tmp_path: Path, name: str, content: bytes, ma
 
 
 @pytest.mark.parametrize(
+    ("offset", "value", "error"),
+    [(62, 0x04, "TokenError"), (21, ord(","), "SyntaxError")],
+    ids=["a byte that is not text", "a comma for a colon"],
+)
+def test_a_damaged_header_is_refused_whatever_numpy_raises(
+    offset: int, value: int, error: str, tmp_path: Path
+) -> None:
+    """NumPy documents ValueError for a bad header, but parses it with
+    tokenize and ast, whose own errors are not ValueErrors: one changed byte
+    in the header was a traceback on the command line (#58)."""
+    good = write_npy(tmp_path / "good.npy", 4, 4, gradient_pixels(4, 4)).read_bytes()
+    damaged = bytearray(good)
+    damaged[offset] = value
+    path = tmp_path / "damaged.npy"
+    path.write_bytes(bytes(damaged))
+
+    with pytest.raises(UnsupportedFileFormatError, match=rf"invalid \.npy header: {error}: "):
+        NPYImage().load(str(path))
+
+
+def test_running_out_of_memory_in_the_header_keeps_its_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from walsh.image.arrays import npy as npy_module
+
+    def exhausted(file: object) -> object:
+        raise MemoryError
+
+    monkeypatch.setitem(npy_module._HEADER_READERS, (1, 0), exhausted)
+    path = write_npy(tmp_path / "good.npy", 4, 4, gradient_pixels(4, 4))
+    with pytest.raises(MemoryError):
+        NPYImage().load(str(path))
+
+
+@pytest.mark.parametrize(
     ("shape", "match"),
     [
         ((12,), "shape \\(12,\\)"),

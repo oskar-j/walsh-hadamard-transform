@@ -127,6 +127,17 @@ def test_samples_above_maxval_are_rejected(tmp_path: Path, content: bytes) -> No
         PPMImage().load(str(path))
 
 
+@pytest.mark.parametrize("maxval", [255, 15])
+def test_a_negative_ascii_sample_is_refused_by_name(tmp_path: Path, maxval: int) -> None:
+    """Only P3 text can say one. It used to reach numpy's uint8 conversion,
+    which raises OverflowError, a traceback on the command line, and on
+    numpy 1.24 wrapped -4 to 252 without a word (#58). Netpbm refuses it."""
+    path = tmp_path / "negative.ppm"
+    path.write_bytes(b"P3\n2 1\n%d\n1 2 3 -4 5 6\n" % maxval)
+    with pytest.raises(UnsupportedFileFormatError, match=r"invalid PPM sample: -4 is negative$"):
+        PPMImage().load(str(path))
+
+
 @pytest.mark.parametrize(
     ("name", "expected"),
     [

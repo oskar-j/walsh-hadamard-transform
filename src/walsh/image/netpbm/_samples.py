@@ -34,9 +34,14 @@ def rescale_sample(value: int, maxval: int, what: str) -> int:
         The sample expressed against a maximum of 255, rounded to nearest.
 
     Raises:
-        UnsupportedFileFormatError: If the sample exceeds ``maxval``, which the
-            Netpbm specifications forbid.
+        UnsupportedFileFormatError: If the sample is negative, which only
+            plain ``P3`` text can say and the Netpbm tools refuse, or exceeds
+            ``maxval``, which the Netpbm specifications forbid.
     """
+    if value < 0:
+        # It would otherwise reach numpy's uint8 conversion, which raises
+        # OverflowError, a traceback, or on numpy 1.24 wraps -4 to 252 (#58).
+        raise UnsupportedFileFormatError(f"invalid {what} sample: {value} is negative")
     if value > maxval:
         raise UnsupportedFileFormatError(f"invalid {what} sample: {value} exceeds maxval {maxval}")
     if maxval == NETPBM_MAX_SAMPLE:
