@@ -168,9 +168,9 @@ class PPMImage(RasterImage):
             maxval: The declared maximum sample value.
 
         Raises:
-            UnsupportedFileFormatError: If a sample is not a number or exceeds
-                ``maxval``, or there are fewer samples than the header
-                promises.
+            UnsupportedFileFormatError: If a sample is not a number, is
+                negative or exceeds ``maxval``, or there are fewer samples
+                than the header promises.
         """
         expected = self._width * self._height * 3
         samples: list[int] = []

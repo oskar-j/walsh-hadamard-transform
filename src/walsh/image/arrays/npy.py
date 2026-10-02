@@ -103,6 +103,18 @@ class NPYImage(RasterImage):
             shape, fortran_order, dtype = reader(file)
         except ValueError as error:
             raise UnsupportedFileFormatError(f"invalid .npy header: {error}") from None
+        except MemoryError:
+            raise
+        except Exception as error:
+            # NumPy documents ValueError, but it runs the header's text through
+            # tokenize and ast, so a corrupt byte there can surface as
+            # TokenError, SyntaxError or TypeError instead: 5,597 of the 32,640
+            # one-byte changes to data/npy/earth.npy's header did, each as a
+            # traceback (#58). The header is at most NumPy's max_header_size,
+            # so a MemoryError here is the machine's and keeps its own name.
+            raise UnsupportedFileFormatError(
+                f"invalid .npy header: {type(error).__name__}: {error}"
+            ) from None
         return tuple(int(n) for n in shape), bool(fortran_order), dtype
 
     @staticmethod
@@ -155,13 +167,14 @@ class NPYImage(RasterImage):
         """
         # A pickle's length is not declared anywhere, so this is the rest of
         # the file, whose size is its own.
-        loaded = safe_loads(file.read(), _OBJECT_LABEL)
+        body = file.read()
+        loaded = safe_loads(body, _OBJECT_LABEL)
         if not isinstance(loaded, np.ndarray) or loaded.shape != shape:
             raise UnsupportedFileFormatError(
                 f"invalid {_OBJECT_LABEL}: the body does not hold an array of the "
                 f"declared shape {shape}"
             )
-        self.set_array(pixels_from_object(loaded, self._declared_size, _OBJECT_LABEL))
+        self.set_array(pixels_from_object(loaded, self._declared_size, _OBJECT_LABEL, len(body)))
 
     def load(self, filename: FileSource) -> None:
         """Read a ``.npy`` from ``filename``, replacing any current contents.

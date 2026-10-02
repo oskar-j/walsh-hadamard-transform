@@ -9,6 +9,72 @@ The `## [x.y.z]` headings are load-bearing: the release workflow extracts the
 section matching the version in `pyproject.toml` and uses it as the GitHub
 Release notes.
 
+## [0.5.7]
+
+Malformed input that once crashed the reader or escaped as a traceback is now
+refused by name, with a clean `Error:` line. Closes #54 and #58.
+
+### Security
+
+- **A 164-byte `.pkl` no longer crashes the interpreter.** The restricted
+  unpickler handed the file a fresh `numpy.dtype` and let the pickle's BUILD
+  opcode drive `dtype.__setstate__`, which is not memory-safe against a state
+  of the wrong shape: `walsh compress` on the crafted file exited with
+  SIGSEGV, no message and no traceback, from the one module whose promise is
+  that nothing in a file is executed. BUILD reaches an object without any
+  allowlist lookup, so the fix is to hand out objects a BUILD cannot harm: a
+  pickled dtype now resolves to the interned instance NumPy shares for a
+  built-in type, whose `__setstate__` ignores its argument, and a non-native,
+  text, datetime or structured type is refused by name. The same 164 bytes
+  reach the reader through `.pkl`, `.pickle` and a `.npy` object array, and
+  all three are closed.
+- **An object array whose element list is too short crashed it too.** NumPy's
+  `ndarray.__setstate__` segfaults on `(1, (), dtype('O'), False, [])`, and a
+  pickle reaches it through the allowlisted `_reconstruct`. The array a pickle
+  builds is now a private `ndarray` subclass whose `__setstate__` checks the
+  shape, dtype and element count NumPy wrote before passing them on; a
+  plain array is handed to callers.
+- **An 80-byte pickle could rewrite NumPy's own `_frombuffer.__defaults__`**
+  for the rest of the process, through a BUILD on the allowlisted function.
+  Every allowlisted function is now wrapped so it has no attribute a BUILD can
+  set.
+- **A pickle can no longer make the unpickler allocate more than the file
+  holds.** A 12-byte `BINBYTES8` declared 256 TiB and ended in a bare
+  `MemoryError`; a 9-byte `LONG_BINPUT` made it commit 256 MiB for the memo.
+  The opcode stream is now walked once before it runs: every length must fit
+  in the bytes that follow it, and every memo index must lie within the file.
+- **A pickle of pixels is bounded by its own size.** `[[(1, 2, 3)] * k] * k`
+  is `4k` bytes and `k²` pixels, so 16 KB described 4000×4000 pixels and took
+  4 s and 570 MiB to walk, growing with the square of the file; one shared
+  tuple as every pixel made it cubic. The picture a list of pixels describes
+  may now hold at most 1032 samples for each byte of the pickle — DEFLATE's
+  own largest expansion, so a pickle costs no more to read than a PNG of the
+  same size — and the size is read from the lists' lengths before anything is
+  walked. A small flat-colour canvas built this way still loads; a larger
+  picture is pickled as a NumPy array or as rows that are separate lists.
+
+### Fixed
+
+- **A corrupt `.npy` header is refused by name.** NumPy documents its header
+  parser as raising `ValueError`, but it runs the header text through
+  `tokenize` and `ast`, whose errors are not: a single non-printable byte in
+  the header surfaced as `tokenize.TokenError`, a traceback. 5,597 of the
+  32,640 one-byte changes to `data/npy/earth.npy`'s header reached this state.
+  The reader now names any of them.
+- **A sample at or beyond 2⁶³ in a pickle is refused by name.** The 0-255
+  range check ran after a conversion to `int64`, which such a sample fails
+  first with `OverflowError`, a traceback; a NumPy-written `uint64` reached
+  it too.
+- **A negative sample in a plain (P3) PPM is refused by name.** `rescale_sample`
+  checked only the upper bound, so `-4` reached NumPy's `uint8` conversion —
+  an `OverflowError` traceback, or on NumPy 1.24 a silent wrap to 252. Netpbm's
+  own tools reject it, and now so does this reader.
+- **A message no longer prints an attacker-controlled `repr()`.** A pickle
+  may hold a tuple nested 20,000 deep, whose `repr()` recurses past the limit
+  (`RecursionError`), and `repr()` expands shared substructure, so a 226-byte
+  pickle produced a 335 MB message. A value shown in a message is now a
+  number, `None` or a short string as written, and otherwise just its type.
+
 ## [0.5.6]
 
 Nothing in the package changes: this protects the codec's reference outputs
