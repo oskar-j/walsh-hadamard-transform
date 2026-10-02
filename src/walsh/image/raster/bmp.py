@@ -174,6 +174,7 @@ class BMPImage(RasterImage):
         """
         with open_binary_read(filename) as file:
             self._read_header(file)
+            self._check_dimensions(self._width, self._height)
             self._read_data(file)
         log.debug("loaded BMP %dx%d from %s", self._width, self._height, filename)
 

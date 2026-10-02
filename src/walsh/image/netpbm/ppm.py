@@ -210,6 +210,7 @@ class PPMImage(RasterImage):
         """
         with open_binary_read(filename) as file:
             maxval = self._read_header(file)
+            self._check_dimensions(self._width, self._height)
             if self._magic == PPM_BINARY_MAGIC:
                 self._read_binary_data(file, maxval)
             else:

@@ -340,13 +340,15 @@ def test_malformed_cim_geometry_is_a_clean_error(
     ("name", "data", "match"),
     [
         # 32 bytes declaring 2000000000x2000000000: file.read() raised
-        # OverflowError, which is not an Error: line.
-        ("huge.ppm", b"P6\n2000000000 2000000000\n255\n\x01\x02\x03", "truncated PPM data"),
+        # OverflowError, which is not an Error: line. Since 0.5.8 (#81) the
+        # codec refuses the size from the header, before a pixel is read; the
+        # reader's own bound is pinned in test_ppm.py and test_pam.py.
+        ("huge.ppm", b"P6\n2000000000 2000000000\n255\n\x01\x02\x03", "image is too large"),
         (
             "huge.pam",
             b"P7\nWIDTH 2000000000\nHEIGHT 2000000000\nDEPTH 3\nMAXVAL 255\n"
             b"TUPLTYPE RGB\nENDHDR\n\x01\x02\x03",
-            "truncated PAM data",
+            "image is too large",
         ),
     ],
 )
@@ -361,6 +363,8 @@ def test_a_netpbm_header_declaring_billions_of_pixels_is_a_clean_error(
 
     assert result.exit_code == 1, (result.output, result.exception)
     assert f"Error: {match}" in result.output
+    # No block size the codec accepts would hold it, so none is advised.
+    assert "No block size fits it" in result.output
     assert not (tmp_path / "out.cim").exists()
 
 

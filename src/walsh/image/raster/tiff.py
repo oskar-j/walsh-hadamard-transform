@@ -409,6 +409,7 @@ class TIFFImage(RasterImage):
             self._width = self._single(entries, TAG_IMAGE_WIDTH)
             self._height = self._single(entries, TAG_IMAGE_LENGTH)
             self._validate(entries)
+            self._check_dimensions(self._width, self._height)
             data = self._read_strips(file, entries, file_size)
 
         self.set_array(np.frombuffer(data, dtype=np.uint8).reshape(self._height, self._width, 3))
