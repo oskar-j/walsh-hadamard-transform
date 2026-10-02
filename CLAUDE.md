@@ -248,7 +248,17 @@ size fields, and bypassing it once wrote five zero bytes into a header.
 `_check_complete` enforces `width * height` pixels, and every `save()` and
 `get_array()` calls it (0.4.5, #23). It belongs there, not in the setters: the
 documented `set_dimensions` then `set_raw_data` build is transiently
-inconsistent by design. `CustomizableImage` is deliberately not a
+inconsistent by design. **Every reader calls `_check_dimensions(width,
+height)` between its header and its pixels** (0.5.8, #81): once the header
+is known to be valid, so a file outside the profile is still refused as
+such, and before a pixel is read, so whatever `set_size_check` installed can
+refuse the picture for the cost of its header. With no check installed, the
+default, it does nothing. A pickle has no header: `pkl._check_shape` calls
+the check once the lists' lengths give the size and before they are walked,
+and a pickled array is checked before `to_rgb`. `tests/image/test_size_check.py`
+holds every reader to all three points by cutting the pixel data short: a
+check that refuses must be heard instead of the reader's "truncated".
+`CustomizableImage` is deliberately not a
 `RasterImage`; it holds each channel as one `(count, edge, edge)` stack,
 `get_stack(channel)` is the array form, and `get_y_data()` and friends return
 views into it. `to_bytes()` / `from_bytes()` (0.5.1) are `save` / `load`
@@ -446,7 +456,16 @@ insertion order matching the on-disk order. `number_of_blocks` is a `H`, so
 `MAX_BLOCKS_PER_CHANNEL` is 65535 and the codec caps out near 4.2 MP at the
 default 8-pixel luma block. `Codec._check_fits_the_container` rejects an
 oversized image up front, naming the channel and the block size that would fit
-(0.4.6, #19); `set_descriptions` re-checks as a backstop. Widening the field
+(0.4.6, #19); `set_descriptions` re-checks as a backstop. **Up front means
+from the input's header** since 0.5.8 (#81): `_read_picture` installs the
+check with `set_size_check`, so the reader refuses before reading a pixel,
+where it used to run only in `encode`, after the whole picture had been read
+and decoded (27 MiB to refuse a 2100x2100 PNG of 10 KB; 0.01 MiB now).
+`encode` keeps it, for an array handed to it directly. Because a header can
+state any size, the advice is capped at `MAX_BLOCK_SIZE`: a picture that 128
+cannot hold is told no block size fits rather than to try one the codec
+refuses. `Vectorizer.parse` does not install the check, on purpose: its
+contract puts the container refusal in `compute()`. Widening the field
 would raise the ceiling and break every existing `.cim`, so it is a format
 decision rather than a fix. Do not "simplify" by deriving the count from the
 dimensions: a zero count is the meaningful "empty channel, fill with a neutral"
@@ -493,7 +512,9 @@ from the umask, since `mkstemp` creates `0o600`.
 Adding a format means a new module in the family folder it belongs to (or a
 new folder, for a new family), subclassing `RasterImage`, plus an import and an
 entry in `SUFFIXES` in `image/__init__.py`, a test module in the matching
-`tests/image/` folder, and its samples in `data/<suffix>/`. Honour the RGB top-down contract there, not in `Codec`. The contract
+`tests/image/` folder, its samples in `data/<suffix>/`, a call to
+`_check_dimensions` between the header and the pixels, and the format in
+`HEADER_FORMATS` in `tests/image/test_size_check.py`. Honour the RGB top-down contract there, not in `Codec`. The contract
 is what makes the source format irrelevant to the output: `tests/codec/test_codec.py`
 asserts that BMP, PPM, PAM and TIFF of one picture compress to byte-identical
 `.cim`.
@@ -797,5 +818,7 @@ escaped as a traceback (#54, #58): a `.pkl` that segfaulted NumPy through a
 dtype or a short object array, an opcode that allocated more than the file
 held, a pickle of pixels that expanded quadratically, a corrupt `.npy`
 header, an out-of-range sample, a negative P3 PPM sample, and a `repr()` in a
-message that the file controlled. Partially based on
+message that the file controlled. v0.5.8 made the container's size limit
+a refusal from the input's header rather than after the whole picture was
+read (#81), through `RasterImage.set_size_check`. Partially based on
 https://github.com/ktisha/python2012/tree/dee4beda8e22f3a66a3e31384d4b72ab66102e88/avereshchagin

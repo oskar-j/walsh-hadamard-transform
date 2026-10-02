@@ -174,7 +174,11 @@ class NPYImage(RasterImage):
                 f"invalid {_OBJECT_LABEL}: the body does not hold an array of the "
                 f"declared shape {shape}"
             )
-        self.set_array(pixels_from_object(loaded, self._declared_size, _OBJECT_LABEL, len(body)))
+        self.set_array(
+            pixels_from_object(
+                loaded, self._declared_size, _OBJECT_LABEL, len(body), self._check_dimensions
+            )
+        )
 
     def load(self, filename: FileSource) -> None:
         """Read a ``.npy`` from ``filename``, replacing any current contents.
@@ -198,6 +202,7 @@ class NPYImage(RasterImage):
                 log.debug("loaded .npy object array from %s", filename)
                 return
             self._validate(shape, dtype)
+            self._check_dimensions(shape[1], shape[0])
             expected = math.prod(shape) * NPY_DTYPE.itemsize
             # Sized from a header field, so never asked for in one call.
             body = read_up_to(file, expected)

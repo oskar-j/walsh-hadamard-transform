@@ -62,7 +62,7 @@ import numpy as np
 from walsh.exceptions import UnsupportedFileFormatError
 from walsh.image._io import FileSource, open_binary_read, open_binary_write
 from walsh.image.arrays._rules import IMAGE_DTYPE, to_rgb, validate_image_array
-from walsh.image.base import RasterImage
+from walsh.image.base import RasterImage, SizeCheck
 
 __all__ = ["PICKLE_PROTOCOL", "PickleImage", "pixels_from_object", "safe_loads"]
 
@@ -831,7 +831,12 @@ def _uniform_length(items: Iterable[Any], what: str, label: str) -> int:
     return lengths.pop()
 
 
-def _check_shape(shape: tuple[int, int, int], source_bytes: int | None, label: str) -> None:
+def _check_shape(
+    shape: tuple[int, int, int],
+    source_bytes: int | None,
+    label: str,
+    size_check: SizeCheck | None,
+) -> None:
     """Refuse a picture no image has, or its file cannot hold, before it is walked.
 
     A pickle stores a list as references, and the same row may be referenced
@@ -848,29 +853,37 @@ def _check_shape(shape: tuple[int, int, int], source_bytes: int | None, label: s
     pixels square. A larger picture is pickled as a NumPy array, whose bytes
     are in the file, or as rows that are lists of their own.
 
+    Last, the caller's own check, from :meth:`RasterImage.set_size_check`:
+    this is the pickle's equivalent of a header, the first point where its
+    size is known and nothing has been walked (0.5.8, #81).
+
     Args:
         shape: ``(height, width, channels)``, as the lists' lengths give it.
         source_bytes: The length of the pickle, or ``None`` for an object
             that did not come from one, which has no bound.
         label: What to call the source in a message.
+        size_check: Called with ``(width, height)`` once the picture is
+            known to be one this reader takes; ``None`` for none.
 
     Raises:
         UnsupportedFileFormatError: If the channel count is not one the
             array rules accept, or the shape holds more samples than
             ``source_bytes`` allows.
+        Exception: Whatever ``size_check`` raises to refuse the picture.
     """
     validate_image_array(shape, IMAGE_DTYPE, label)
-    if source_bytes is None:
-        return
     height, width, channels = shape
-    samples = height * width * channels
-    if samples > source_bytes * _MAX_SAMPLES_PER_BYTE:
+    if source_bytes is not None and height * width * channels > (
+        source_bytes * _MAX_SAMPLES_PER_BYTE
+    ):
         raise UnsupportedFileFormatError(
             f"unsupported {label}: its {source_bytes} bytes describe {width}x{height} pixels "
             f"of {channels} samples, which only lists that repeat one row or pixel can; at "
             f"most {_MAX_SAMPLES_PER_BYTE} samples a byte are read. Pickle the picture as "
             f"a NumPy array, or as rows that are separate lists"
         )
+    if size_check is not None:
+        size_check(width, height)
 
 
 def _array_from_sequence(
@@ -878,6 +891,7 @@ def _array_from_sequence(
     declared: tuple[int, int] | None,
     label: str,
     source_bytes: int | None,
+    size_check: SizeCheck | None,
 ) -> np.ndarray:
     """Build the ``(height, width, channels)`` array a list of pixels describes.
 
@@ -896,6 +910,8 @@ def _array_from_sequence(
         label: What to call the source in a message.
         source_bytes: The length of the pickle the lists came from, which
             bounds the picture they may describe; ``None`` for no bound.
+        size_check: The caller's check of ``(width, height)``, put before
+            the walk; ``None`` for none.
 
     Returns:
         The array, ``uint8``, of a shape the array rules accept.
@@ -906,6 +922,7 @@ def _array_from_sequence(
             match its length, rows disagree with a declared size, the
             channel count is not one an image has, or the picture is larger
             than its pickle can hold.
+        Exception: Whatever ``size_check`` raises to refuse the picture.
     """
     if len(pixels) == 0:
         raise UnsupportedFileFormatError(f"unsupported {label}: the pixel list is empty")
@@ -920,7 +937,7 @@ def _array_from_sequence(
         height = len(pixels)
         width = _uniform_length(pixels, "row", label)
         # By the first pixel, which the walk below then holds every other to.
-        _check_shape((height, width, len(first[0])), source_bytes, label)
+        _check_shape((height, width, len(first[0])), source_bytes, label, size_check)
         channels = _uniform_length(_Reiterable(lambda: chain.from_iterable(pixels)), "pixel", label)
         samples = _samples(
             _Reiterable(lambda: chain.from_iterable(chain.from_iterable(pixels))),
@@ -944,7 +961,7 @@ def _array_from_sequence(
             f"unsupported {label}: {count} pixels cannot fill the declared {width}x{height} "
             f"({width * height} pixels)"
         )
-    _check_shape((height, width, channels), source_bytes, label)
+    _check_shape((height, width, channels), source_bytes, label, size_check)
     samples = _samples(_Reiterable(lambda: chain.from_iterable(pixels)), count * channels, label)
     return samples.reshape(height, width, channels)
 
@@ -978,6 +995,7 @@ def pixels_from_object(
     declared: tuple[int, int] | None = None,
     label: str = "pickle",
     source_bytes: int | None = None,
+    size_check: SizeCheck | None = None,
 ) -> np.ndarray:
     """Turn an unpickled object into the ``(height, width, 3)`` RGB array.
 
@@ -994,6 +1012,10 @@ def pixels_from_object(
             since lists in a pickle can repeat one row without storing it
             again; see :func:`_check_shape`. ``None``, for an object of the
             caller's own making, sets no bound.
+        size_check: Called with the picture's ``(width, height)`` once it is
+            known to be one this reader takes and before a list of pixels is
+            walked, as :meth:`RasterImage.set_size_check` describes; ``None``
+            for none.
 
     Returns:
         The RGB array, ``uint8`` and C-contiguous.
@@ -1002,6 +1024,7 @@ def pixels_from_object(
         UnsupportedFileFormatError: If the object is none of those, breaks
             the rules of the one it is, contradicts a declared size, or
             describes more than ``source_bytes`` can hold.
+        Exception: Whatever ``size_check`` raises to refuse the picture.
     """
     if isinstance(loaded, dict):
         if set(loaded) != _WRAPPER_KEYS:
@@ -1020,17 +1043,21 @@ def pixels_from_object(
             )
         if isinstance(loaded["pixels"], dict):
             raise UnsupportedFileFormatError(f"unsupported {label}: 'pixels' is another dict")
-        return pixels_from_object(loaded["pixels"], wrapped, label, source_bytes)
+        return pixels_from_object(loaded["pixels"], wrapped, label, source_bytes, size_check)
 
     if isinstance(loaded, np.ndarray) and loaded.dtype.hasobject:
         loaded = loaded.tolist()
 
     if isinstance(loaded, np.ndarray):
         validate_image_array(loaded.shape, loaded.dtype, label)
+        # Its bytes were in the pickle, so it is no larger than the file; the
+        # check still comes before to_rgb, which may triple a greyscale one.
+        if size_check is not None:
+            size_check(loaded.shape[1], loaded.shape[0])
         # A plain ndarray, not the _PickledArray unpickling made.
         array = loaded.view(np.ndarray)
     elif isinstance(loaded, (list, tuple)):
-        array = _array_from_sequence(loaded, declared, label, source_bytes)
+        array = _array_from_sequence(loaded, declared, label, source_bytes, size_check)
     else:
         raise UnsupportedFileFormatError(
             f"unsupported {label}: it holds a {type(loaded).__name__}, not an image; expected "
@@ -1072,7 +1099,14 @@ class PickleImage(RasterImage):
             # The whole file, whose size is its own and not a field's.
             data = file.read()
         loaded = safe_loads(data)
-        self.set_array(pixels_from_object(loaded, self._declared_size, source_bytes=len(data)))
+        self.set_array(
+            pixels_from_object(
+                loaded,
+                self._declared_size,
+                source_bytes=len(data),
+                size_check=self._check_dimensions,
+            )
+        )
         log.debug("loaded pickle %dx%d from %s", self._width, self._height, filename)
 
     def save(self, filename: FileSource) -> None:

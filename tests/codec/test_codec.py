@@ -592,6 +592,92 @@ def test_the_same_image_compresses_with_a_larger_block(tmp_path: Path) -> None:
     assert output.stat().st_size > 0
 
 
+def _oversized(kind: str, path: Path) -> Path:
+    """256x256, one block over the limit at a 1-pixel luma block, pixels cut short."""
+    import pickle
+
+    from conftest import build_png, build_tiff, gradient_pixels, write_bmp, write_npy, write_pam
+
+    pixels = gradient_pixels(256, 256)
+    if kind == "pkl":
+        # A pickle has no header to stop at; its lists are complete.
+        rows = [pixels[row * 256 : (row + 1) * 256] for row in range(256)]
+        path.write_bytes(pickle.dumps(rows, protocol=4))
+        return path
+    writers = {
+        "bmp": lambda: write_bmp(path, 256, 256, pixels).read_bytes(),
+        "png": lambda: build_png(256, 256, pixels),
+        "ppm": lambda: b"P6\n256 256\n255\n" + bytes(channel for p in pixels for channel in p),
+        "pam": lambda: write_pam(path, 256, 256, pixels).read_bytes(),
+        "tiff": lambda: build_tiff(256, 256, pixels),
+        "npy": lambda: write_npy(path, 256, 256, pixels).read_bytes(),
+    }
+    path.write_bytes(writers[kind]()[:-1000])
+    return path
+
+
+@pytest.mark.parametrize("kind", ["bmp", "png", "ppm", "pam", "tiff", "npy", "pkl"])
+def test_compress_refuses_an_oversized_picture_from_its_header(kind: str, tmp_path: Path) -> None:
+    """The container check ran in encode, after the reader had read and
+    decoded the whole picture (#81). The reader now runs it once the header
+    has given the size: the pixel data here is cut short, so a refusal that
+    names the container could only have come from the header."""
+    source = _oversized(kind, tmp_path / f"big.{kind}")
+    output = tmp_path / "existing.cim"
+    output.write_bytes(b"A PREVIOUS ENCODE")
+
+    codec = Codec(y_block_size=1, packed_block_size=1)
+    with pytest.raises(UnsupportedFileFormatError, match=r"too large for the \.cim container"):
+        codec.compress(input=str(source), output=str(output)).run()
+
+    assert output.read_bytes() == b"A PREVIOUS ENCODE"
+
+
+@pytest.mark.parametrize("output", ["out.cim", "out.ppm"], ids=["to a .cim", "to a picture"])
+def test_an_oversized_picture_costs_only_its_header_to_refuse(output: str, tmp_path: Path) -> None:
+    """2100x2100 is 4.41 MP, just past the default 4.19. As a PNG it is 10 KB
+    that inflates to 13 MB, and 0.5.7 decoded all of it, 27 MiB at the peak,
+    before refusing a size the header had stated."""
+    import tracemalloc
+
+    from walsh.image import PNGImage
+
+    source = tmp_path / "big.png"
+    picture = PNGImage()
+    picture.set_array(np.zeros((2100, 2100, 3), dtype=np.uint8))
+    picture.save(str(source))
+    del picture
+
+    tracemalloc.start()
+    try:
+        with pytest.raises(UnsupportedFileFormatError, match=r"2100x2100 image needs 69169 luma"):
+            Codec().compress(input=str(source), output=str(tmp_path / output)).run()
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert peak < 1_000_000
+    assert not (tmp_path / output).exists()
+
+
+def test_no_block_size_is_advised_when_none_would_hold_the_picture() -> None:
+    """A header can state any size, and since #81 a header's size reaches this
+    message. Advising a block size past 128, which the codec refuses, helped
+    nobody."""
+    with pytest.raises(
+        UnsupportedFileFormatError,
+        match=r"No block size fits it: even --y-block-size 128, the largest, holds about "
+        r"1074 megapixels\. Scale the image down\.$",
+    ):
+        Codec()._check_fits_the_container(32768, 32768)
+
+    # One block row and column fewer, and the largest block holds it.
+    with pytest.raises(UnsupportedFileFormatError, match=r"Retry with --y-block-size 128 or"):
+        Codec()._check_fits_the_container(32640, 32640)
+    Codec(y_block_size=128, cb_block_size=128, cr_block_size=128)._check_fits_the_container(
+        32640, 32640
+    )
+
+
 def test_merge_rejects_a_block_count_that_cannot_tile_the_plane() -> None:
     """Before 0.4.7 a surplus was dropped silently and a shortfall raised a
     numpy reshape error naming no dimension. The reader now guarantees the

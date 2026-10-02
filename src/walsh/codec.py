@@ -418,7 +418,7 @@ class Codec:
             UnsupportedFileFormatError: If any channel would need more than
                 ``MAX_BLOCKS_PER_CHANNEL`` blocks. The message names the
                 channel, its count, the limit, and the block size that would
-                bring the image inside it.
+                bring the image inside it, or says that none would.
         """
         channels = (
             ("luma", self._y_block_size),
@@ -430,11 +430,28 @@ class Codec:
             if blocks <= MAX_BLOCKS_PER_CHANNEL:
                 continue
             # The count falls by the square of the block size, so this is the
-            # smallest power of two that brings the image inside the limit.
+            # smallest power of two that brings the image inside the limit,
+            # unless even the largest block the codec takes does not.
             sufficient = block_size
-            while self._count_blocks(width, height, sufficient) > MAX_BLOCKS_PER_CHANNEL:
+            while (
+                sufficient < MAX_BLOCK_SIZE
+                and self._count_blocks(width, height, sufficient) > MAX_BLOCKS_PER_CHANNEL
+            ):
                 sufficient *= 2
             option = "--y-block-size" if channel == "luma" else "--chroma-block-size"
+            if self._count_blocks(width, height, sufficient) > MAX_BLOCKS_PER_CHANNEL:
+                # Since 0.5.8 a header's size reaches this check before any
+                # pixel is read (#81), so a size no setting can hold is no
+                # longer only a gigapixel array's: advising a block size the
+                # codec would then refuse helped nobody.
+                remedy = (
+                    f"No block size fits it: even {option} {MAX_BLOCK_SIZE}, "
+                    f"the largest, holds about "
+                    f"{MAX_BLOCKS_PER_CHANNEL * MAX_BLOCK_SIZE**2 / 1_000_000:.0f} "
+                    f"megapixels. Scale the image down."
+                )
+            else:
+                remedy = f"Retry with {option} {sufficient} or larger, or scale the image down."
             ceiling = MAX_BLOCKS_PER_CHANNEL * block_size * block_size
             in_words = (
                 f"{ceiling / 1_000_000:.1f} megapixels"
@@ -445,8 +462,7 @@ class Codec:
                 f"image is too large for the .cim container: a {width}x{height} image "
                 f"needs {blocks} {channel} blocks of {block_size} pixels, and the format "
                 f"stores at most {MAX_BLOCKS_PER_CHANNEL} per channel, which is "
-                f"{in_words} at this block size. "
-                f"Retry with {option} {sufficient} or larger, or scale the image down."
+                f"{in_words} at this block size. {remedy}"
             )
 
     def _slice(self, values: npt.ArrayLike, width: int, height: int, block_size: int) -> Block:
@@ -539,18 +555,27 @@ class Codec:
     def _read_picture(self) -> PixelArray:
         """Read the input picture, its format chosen from the filename suffix.
 
+        The reader is given the container check, which it runs as soon as
+        the file's header has given the size (0.5.8, #81). :meth:`encode`
+        runs the same check, but only once the whole picture has been read,
+        decoded and handed to it: a 70-megapixel PPM was read in full, and a
+        small PNG inflated to hundreds of megabytes, before being refused for
+        a size its header had stated at the start.
+
         Returns:
             The pixels, ``(height, width, 3)`` RGB.
 
         Raises:
-            UnsupportedFileFormatError: If the input suffix is unknown or the
-                file is not valid for its format.
+            UnsupportedFileFormatError: If the input suffix is unknown, the
+                file is not valid for its format, or the picture needs more
+                blocks than the ``.cim`` container can count.
             ValueError: If the picture is not the size that was declared.
             OSError: If the input cannot be opened.
         """
         source_image = reader_for(self._input)
         if self._input_size is not None:
             source_image.declare_size(*self._input_size)
+        source_image.set_size_check(self._check_fits_the_container)
         source_image.load(self._input)
 
         width, height = source_image.get_dimensions()

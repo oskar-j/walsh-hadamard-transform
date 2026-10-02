@@ -568,6 +568,7 @@ class PNGImage(RasterImage):
                     f"corrupt PNG: the first chunk is {kind.decode('ascii')}, not IHDR"
                 )
             header = _parse_header(data)
+            self._check_dimensions(header.width, header.height)
             transparent, filtered = self._read_body(chunks, header)
 
         table = filtered.reshape(header.height, 1 + header.row_bytes)

@@ -191,6 +191,7 @@ class PAMImage(RasterImage):
         """
         with open_binary_read(filename) as file:
             maxval = self._read_header(file)
+            self._check_dimensions(self._width, self._height)
             samples = read_samples(file, self._width * self._height, maxval, "PAM")
         self.set_array(samples.reshape(self._height, self._width, 3))
         log.debug("loaded PAM %dx%d from %s", self._width, self._height, filename)

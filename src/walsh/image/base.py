@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import itertools
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 import numpy as np
 import numpy.typing as npt
@@ -21,6 +21,10 @@ PixelArray = npt.NDArray[np.uint8]
 
 #: Samples per pixel in the in-memory contract.
 CHANNELS = 3
+
+#: Given a picture's ``(width, height)``, raises to refuse it. See
+#: :meth:`RasterImage.set_size_check`.
+SizeCheck = Callable[[int, int], None]
 
 
 class RasterImage(ABC):
@@ -51,6 +55,7 @@ class RasterImage(ABC):
         self._height = 0
         self._pixels: PixelArray = np.empty((0, CHANNELS), dtype=np.uint8)
         self._declared_size: tuple[int, int] | None = None
+        self._size_check: SizeCheck | None = None
 
     @abstractmethod
     def load(self, filename: FileSource) -> None:
@@ -99,6 +104,42 @@ class RasterImage(ABC):
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
                 raise ValueError(f"declared {name} must be a positive integer, got {value!r}")
         self._declared_size = (width, height)
+
+    def set_size_check(self, check: SizeCheck | None) -> None:
+        """Have :meth:`load` put the picture's size to ``check`` before reading a pixel.
+
+        A reader learns the width and height from the file's header, and only
+        then reads and decodes the pixels, which is where the time and memory
+        go. ``check`` is called between the two, with ``(width, height)``,
+        once the header is known to be valid; whatever it raises ends the
+        load before anything is built. :class:`~walsh.codec.Codec` passes its
+        own container check, so a picture too large to compress is refused
+        for the cost of its header (0.5.8, #81), and a caller of a reader can
+        pass any bound of its own, such as a pixel budget. A pickle, whose
+        size is in its lists rather than a header, is checked once those are
+        unpickled and before they are walked.
+
+        Args:
+            check: Called with ``(width, height)``, raising to refuse the
+                picture; ``None`` to check nothing, which is the default.
+        """
+        self._size_check = check
+
+    def _check_dimensions(self, width: int, height: int) -> None:
+        """Put a picture's size to the check :meth:`set_size_check` gave, if any.
+
+        Every reader calls this once its header is validated and before it
+        reads the pixels.
+
+        Args:
+            width: The width the file declares.
+            height: The height the file declares.
+
+        Raises:
+            Exception: Whatever the check raises to refuse the picture.
+        """
+        if self._size_check is not None:
+            self._size_check(width, height)
 
     def get_dimensions(self) -> tuple[int, int]:
         """Return the image size.

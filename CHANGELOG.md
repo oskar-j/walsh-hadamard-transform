@@ -9,6 +9,45 @@ The `## [x.y.z]` headings are load-bearing: the release workflow extracts the
 section matching the version in `pyproject.toml` and uses it as the GitHub
 Release notes.
 
+## [0.5.8]
+
+A picture too large for the `.cim` container is refused for the cost of its
+header, before it is read. Closes #81.
+
+### Changed
+
+- **The container's size limit is checked as soon as a file's header gives
+  the size.** `compress` refused a picture that needs more blocks than a
+  `.cim` channel can count (about 4.2 megapixels at the default 8-pixel luma
+  block) only in `encode`, after the reader had read and decoded all of it:
+  a 2100x2100 picture, just past the limit, cost 27 MiB and 18 ms to refuse,
+  whether as a 13 MB PPM or a 10 KB PNG that inflates to 13 MB, and the cost
+  grew with the picture. Each reader now asks before it reads a pixel, so
+  the same refusal costs 0.01 MiB and under a millisecond. The pictures
+  refused, and the message, are the same, and the limit still follows the
+  block sizes given. A pickle, whose size is in its lists rather than a
+  header, is checked once those are unpickled and before they are walked.
+
+### Added
+
+- **`RasterImage.set_size_check(check)`**: `load` calls `check(width,
+  height)` once the header is known to be valid and before reading any
+  pixels, and whatever it raises ends the load. `Codec` uses it for the
+  container limit, and a caller of a reader can use it for a bound of its
+  own, such as a pixel budget. `pixels_from_object` takes the same check as
+  `size_check=`.
+
+### Fixed
+
+- **A picture that no block size can hold is no longer told to try one the
+  codec refuses.** The container message advised the smallest power-of-two
+  luma block that fits, with no upper bound, so a header declaring
+  2,000,000,000 pixels a side was told to retry with `--y-block-size
+  8388608`; the codec takes at most 128. Such a picture is now told that no
+  block size fits, and that 128 holds about 1074 megapixels. Before this
+  release only an array already in memory could reach that advice; now a
+  header can.
+
 ## [0.5.7]
 
 Malformed input that once crashed the reader or escaped as a traceback is now

@@ -202,8 +202,10 @@ lossy reconstruction of itself.
 
 The `.cim` container counts each channel's blocks in a 16-bit field, so at the
 default 8-pixel luma block an image must be under about 4.2 megapixels. Larger
-images are refused with a message naming the block size that would fit them:
+images are refused as soon as the file's header gives the size, before the
+picture is read, with a message naming the block size that would fit them:
 `--y-block-size 16` roughly quadruples the ceiling, at some cost in detail.
+The largest block, 128, holds about 1074 megapixels.
 
 `--coeff-removal` is the second, independent lossy knob: spectral coefficients
 smaller than the given magnitude are zeroed. It does not change the `.cim`
